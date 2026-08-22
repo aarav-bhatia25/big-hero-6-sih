@@ -1,152 +1,123 @@
-# 🛡️ Prahari (Big Hero 6) — Master Architectural Blueprint & Technical Documentation
+# 🛡️ Prahari (Big Hero 6) — Comprehensive Technical Architecture Specification & Implementation Guide
 
-Welcome to the **Prahari Tourist Safety Platform** (`big-hero-6-sih`) master architectural documentation and execution blueprint.
+Welcome to the master technical specification for **Prahari** (`big-hero-6-sih`), an AI-powered tourist safety, spatial monitoring, emergency response, and blockchain identity platform designed for Indian tourism districts.
 
-This document serves as the single source of truth for the system architecture, pnpm monorepo layout, data flows, database schemas, machine learning risk engines, real-time WebSocket gateways, Sepolia smart contracts, and phased execution roadmap.
+This document contains full engineering specifications, codebase directory maps, data flow sequence diagrams, exact mathematical formulas, Mongoose schemas, Solidity smart contract code contracts, Socket.IO event payloads, and deployment procedures.
 
 ---
 
-## 📐 1. Monorepo Directory Layout
+## 1. System Architecture & Workspace Directory Layout
 
-The platform is organized as a high-performance `pnpm` workspace monorepo (`big-hero-6-sih`):
+Prahari is structured as a high-performance `pnpm` monorepo workspace containing four main modules:
 
 ```text
 big-hero-6-sih/
 │
-├── DOCUMENTATION.md           # 👈 Complete architecture, data flow & execution blueprint
-├── README.md                  # Quickstart guide & environment setup instructions
-├── package.json               # Root workspace manifest (scripts: dev, build, lint, etc.)
-├── pnpm-workspace.yaml        # Workspace configuration (apps/*, packages/*)
-├── pnpm-lock.yaml             # Lockfile for reproducible builds
+├── DOCUMENTATION.md                # 👈 Comprehensive technical specification & API blueprint
+├── README.md                       # Quickstart commands & developer onboarding
+├── package.json                    # Monorepo root workspace configuration & scripts
+├── pnpm-workspace.yaml             # Workspace definitions (apps/*, packages/*)
+├── .env / .env.local               # Environment variables (MongoDB URI, Socket URL, RPCs)
 │
 ├── apps/
-│   ├── web/                   # Next.js 15 App Router Frontend (Traveller App & Authority Command Center)
-│   │   ├── app/               # Pages & API Route Handlers
-│   │   │   ├── authority/     # Authority Command Center Dashboard (Live Map, Incident Dispatch Queue)
-│   │   │   ├── tourist/       # Mobile-first Traveller App (Digital ID, SOS, Safe Navigation)
-│   │   │   ├── sos/           # One-Tap Dedicated Emergency Panic Trigger View
-│   │   │   ├── onboarding/    # Tourist Digital Passport Registration & Consent Flow
-│   │   │   ├── api/           # REST API endpoints
-│   │   │   │   ├── geofences/ # Safe zone & hazard polygon CRUD endpoints
-│   │   │   │   ├── incidents/ # Incident lifecycle management & emergency dispatch triggers
-│   │   │   │   ├── locations/ # GPS telemetry ingestion & spatial tracking
-│   │   │   │   ├── tourists/  # Tourist identity profiles & DID credential queries
-│   │   │   │   ├── health/    # Service health check endpoint
-│   │   │   │   └── seed/      # Database mock data seeder
-│   │   │   ├── globals.css    # Tailwind CSS design system tokens & glassmorphism utilities
-│   │   │   └── page.tsx       # District Command Center main view
-│   │   ├── components/        # Reusable React UI Components
-│   │   │   ├── authority/     # Incident Queue, Detail Modal, Responder Trackers
-│   │   │   ├── dashboard/     # Sidebar, Header, Metric Cards, Risk Zones Panel
-│   │   │   ├── map/           # MapLibre GL & Leaflet OpenStreetMap live renderers
-│   │   │   ├── traveller/     # SOS Button, Digital ID Card, Risk Gauge
-│   │   │   └── ui/            # Radix UI primitives (Button, Card, Badge, Modal)
-│   │   └── lib/               # Shared utilities, database pooling, models & risk engines
-│   │       ├── db.ts          # MongoDB connection pooling & collection getters
-│   │       ├── mongodb.ts     # Mongoose connection client
-│   │       ├── geospatial.ts  # Turf.js point-in-polygon & spatial calculations
-│   │       ├── risk.ts        # Deterministic multi-factor risk scoring engine
-│   │       ├── socketClient.ts# Socket.IO client event handler
-│   │       ├── models/        # Mongoose Models (Tourist, Location, Geofence, Incident, Responder)
-│   │       └── services/      # Dispatch engine & Digital ID QR code generators
+│   ├── web/                        # Next.js 15 App Router Full-Stack Application (@prahari/web)
+│   │   ├── app/                    # Pages & Route Handlers
+│   │   │   ├── page.tsx            # Official Govt of India Landing Portal
+│   │   │   ├── citizen/page.tsx    # Citizen & Tourist Safety Hub (/citizen & /tourist)
+│   │   │   ├── admin/page.tsx      # Authority Command Dashboard (/admin & /authority)
+│   │   │   ├── dir/page.tsx        # Redirect alias to /citizen
+│   │   │   ├── onboarding/page.tsx # Tourist Digital Identity & Passport Registration
+│   │   │   ├── sos/page.tsx        # Standalone SOS Panic Trigger screen
+│   │   │   └── api/                # REST API Route Handlers
+│   │   │       ├── geofences/      # GET / POST geofence boundaries
+│   │   │       ├── incidents/      # GET / POST emergency SOS & responder dispatch
+│   │   │       ├── locations/      # GET / POST GPS telemetry logging
+│   │   │       ├── tourists/       # GET tourist identity profiles & DID lookup
+│   │   │       ├── efir/           # GET / POST automated draft E-FIR complaints
+│   │   │       ├── attire/         # GET / POST AI visual clothing profiles
+│   │   │       ├── health/         # Health check endpoint
+│   │   │       └── seed/           # Database initial seeder script
+│   │   │
+│   │   ├── components/             # React UI Component Hierarchy
+│   │   │   ├── authority/          # Incident Queue, Detail Modal, Responder Trackers
+│   │   │   ├── dashboard/          # Sidebar, Header, Metric Cards, Risk Zones Panel
+│   │   │   ├── maps/               # MapLibre GL & Leaflet OpenStreetMap live renderers
+│   │   │   ├── tourist/            # SOS Panic Button, Digital ID Card, Risk Gauge
+│   │   │   └── ui/                 # Shared design primitives (Button, Card, Badge, Modal)
+│   │   │
+│   │   └── lib/                    # Core Business Logic & DB Drivers
+│   │       ├── db.ts               # MongoDB MongoClient pooling & collection getters
+│   │       ├── mongodb.ts          # Mongoose connection client
+│   │       ├── geospatial.ts       # Turf.js point-in-polygon spatial calculations
+│   │       ├── risk.ts             # Deterministic multi-factor risk engine
+│   │       ├── socketClient.ts     # Socket.IO client gateway listener
+│   │       ├── models/             # Mongoose Schemas (Tourist, Location, Geofence, Incident, Responder)
+│   │       └── services/           # Dispatch engine & Digital ID QR code generators
 │   │
-│   └── realtime/              # Node.js + Express + Socket.IO Event Gateway
-│       ├── src/
-│       │   └── index.js       # WebSocket event broker (tourist:location, incident:create, incident:update)
-│       └── package.json       # Service manifest
+│   └── realtime/                   # Real-time WebSocket Gateway (@prahari/realtime)
+│       └── src/
+│           └── index.js            # Express + Socket.IO server listening on :3001
 │
 ├── services/
-│   └── ml/                    # Python 3.11 + FastAPI + scikit-learn Machine Learning Service
-│       ├── app/
-│       │   └── main.py        # Anomaly scoring REST API (`POST /risk-score`, `GET /health`)
-│       └── requirements.txt   # FastAPI, Uvicorn, Scikit-Learn, Pydantic dependencies
+│   └── ml/                         # Python 3.11 FastAPI Anomaly Scoring Service
+│       └── app/
+│           └── main.py             # Anomaly REST API (POST /risk-score, GET /health)
 │
 └── packages/
-    └── contracts/             # Solidity Smart Contracts (Ethereum Sepolia Audit Ledger)
-        ├── contracts/         # Smart contracts source code
-        │   ├── IncidentRegistry.sol        # Tamper-proof on-chain incident audit log
+    └── contracts/                  # Hardhat Solidity Smart Contracts (@prahari/contracts)
+        ├── contracts/              # Solidity Smart Contracts
+        │   ├── IncidentRegistry.sol        # On-chain tamper-proof incident evidence ledger
         │   ├── GeofenceRegistry.sol        # Government-published boundary registry
-        │   ├── ResponderRegistry.sol       # Verified emergency unit registry
-        │   ├── TouristIdentityRegistry.sol # Verifiable credential status registry
-        │   └── TouristIdentity.sol         # Identity token definitions
-        ├── scripts/           # Deployment & interaction scripts (deploy.ts)
-        ├── test/              # Hardhat unit tests
-        ├── hardhat.config.ts  # Hardhat compiler & Sepolia network configuration
-        └── package.json       # Contracts package manifest
+        │   ├── ResponderRegistry.sol       # Verified emergency responder unit directory
+        │   ├── TouristIdentityRegistry.sol # Verifiable credential status tracker
+        │   └── TouristIdentity.sol         # Identity token contract
+        └── hardhat.config.ts       # Hardhat compiler & Sepolia network configuration
 ```
 
 ---
 
-## 🏗️ 2. High-Level Architecture Diagram
+## 2. End-to-End Data Flow & Sequence Mechanics
+
+### 🚨 Emergency SOS Trigger & Intelligent Dispatch Sequence
+When a tourist presses the 🚨 SOS button on `/citizen`:
 
 ```text
-                    ┌────────────────────────┐
-                    │  Tourist Mobile App    │
-                    │   (Next.js App Router) │
-                    └───────────┬────────────┘
-                                │
-                    HTTPS / WSS (Socket.IO)
-                                │
-                                ▼
-               ┌─────────────────────────────────┐
-               │    PRAHARI WEB FRONTEND APP     │
-               │         (@prahari/web)          │
-               │                                 │
-               │  - Route Handlers               │
-               │  - Turf.js Geofence Engine      │
-               │  - Deterministic Risk Engine    │
-               │  - Emergency Dispatch Matching  │
-               └────────┬───────┬───────┬────────┘
-                        │       │       │
-              ┌─────────┘       │       └──────────┐
-              ▼                 ▼                  ▼
-      ┌───────────────┐ ┌───────────────┐ ┌───────────────────┐
-      │ MongoDB Atlas │ │ Realtime WS   │ │ Python FastAPI ML │
-      │ Database      │ │ Server        │ │ Anomaly Engine    │
-      │ (Mongoose)    │ │ (@prahari/    │ │ (services/ml)     │
-      │               │ │  realtime)    │ │                   │
-      └───────────────┘ └───────────────┘ └───────────────────┘
-                                                 │
-                                                 ▼
-                                        ┌───────────────────┐
-                                        │ Ethereum Sepolia  │
-                                        │ Audit Ledger      │
-                                        │ (@prahari/        │
-                                        │  contracts)       │
-                                        └───────────────────┘
+[Tourist Mobile Client (/citizen)]
+               │
+   1. POST /api/incidents
+      Payload: { touristId, type: "PANIC", location: { lat, lng } }
+               │
+               ▼
+[Next.js API Handler (app/api/incidents/route.ts)]
+               │
+   2. Execute Turf.js Nearest Responder Matching (findNearestResponder)
+      - Queries active responders from MongoDB
+      - Computes geodesic distance (km) & estimated ETA (mins)
+               │
+   3. Write Incident Document to MongoDB Atlas ('incidents' collection)
+               │
+   4. Emit Socket.IO Event 'incident:create' → Realtime Gateway (:3001)
+               │
+               ▼
+[Realtime WebSocket Gateway (apps/realtime)]
+               │
+   5. Broadcast 'incident:created' to connected Authority Dashboards
+               │
+               ▼
+[Authority Command Dashboard (/admin)]
+   6. Plays emergency audio chime
+   7. Flashes incident card on Incident Queue
+   8. Draws incident pin & nearest responder route on MapLibre / Leaflet Map
 ```
 
 ---
 
-## 🗺️ 3. Phased Implementation Plan (v0.1 → v2.0)
+## 3. Verifiable Digital Identity & KYC Mechanics
 
-| Milestone | Stage Name | Core Focus | Key Deliverables |
-| :--- | :--- | :--- | :--- |
-| **v0.1** | Setup & DB | Monorepo Foundation | pnpm workspace setup, MongoDB collection client (`lib/db.ts`) |
-| **v0.2** | Tourist Auth | Identity & Sessions | Role-based access control (`tourist`, `authority`, `responder`, `admin`) |
-| **v0.3** | Digital Tourist ID | Mock Verifiable ID | `DTI-IND-XXXXXX` JSON schema, QR Code generator (`did:tourist:...`) |
-| **v0.4** | Maps & GPS | Telemetry Tracking | MapLibre GL + OpenStreetMap layer, continuous GPS location logging |
-| **v0.5** | Geofence Engine | Spatial Safety | Turf.js `booleanPointInPolygon` checks against registered danger zones |
-| **v0.6** | 🚨 Panic Button | Emergency SOS | One-tap SOS trigger (`POST /api/incidents`), automated dispatcher alert |
-| **v0.7** | Command Dashboard | Authority Center | Command Center UI with live map, incident queue, responder trackers |
-| **v0.8** | Realtime WebSockets | Event Streaming | Socket.IO gateway (`tourist:location`, `incident:create` events) |
-| **v0.9** | Risk Engine (Rules) | Dynamic Safety Score | Deterministic score formula (0-100) combining geofence, time, & hazards |
-| **v1.0** | **Working Monorepo MVP** | Hackathon Milestone | End-to-end working monorepo from Tourist SOS to Authority Dispatch |
-| **v1.1** | Anomaly Engine | FastAPI ML Model | Telemetry feature extraction & Isolation Forest anomaly scoring |
-| **v1.2** | Disaster Feeds | Weather & Hazards | Ingest IMD/NDMA disaster warning polygons (floods, landslides) |
-| **v1.3** | Multilingual Voice | Accessibility | Speech recognition & emergency intent classification |
-| **v1.4** | Sepolia Audit Log | Blockchain Hashing | SHA-256 incident evidence hashing anchored to Ethereum Sepolia |
-| **v1.5** | E-FIR & Visual AI | Investigation Tools | Draft E-FIR generator with officer review + visual outfit profiles |
-| **v2.0** | Production Hardening | Security & Compliance | TTL auto-purging, access audit logs, permission enforcement |
+Prahari uses a privacy-first decentralized identity model inspired by W3C Verifiable Credentials and the India AI Impact Summit framework:
 
----
-
-## 🔬 4. Detailed Feature Specifications
-
-### 🆔 Phase 1: Digital Tourist ID (v0.3)
-Prevents fake emergency reports while preserving tourist privacy through Decentralized Identifiers (DIDs).
-
-* **Mock Payload Schema**:
+* **Decentralized Identifier (DID)**: `did:tourist:DTI-IND-000123`
+* **Credential Data Schema**:
   ```json
   {
     "touristId": "DTI-IND-000123",
@@ -154,87 +125,199 @@ Prevents fake emergency reports while preserving tourist privacy through Decentr
     "nationality": "India",
     "verified": true,
     "did": "did:tourist:DTI-IND-000123",
-    "issueDate": "2026-08-22"
+    "issueDate": "2026-08-22",
+    "kycType": "Aadhaar / Passport MRZ",
+    "emergencyContacts": [
+      { "name": "Ananya Sharma", "phone": "+91 98765 43210", "relationship": "Sister" }
+    ]
   }
   ```
-* **QR Code Format**: Encodes Decentralized Identifier string: `did:tourist:DTI-IND-000123`
-* **Verification Flow**: Scanned by safety officers -> Queries `/api/tourists/DTI-IND-000123` -> Validates active status and emergency contacts.
+* **Offline Verification Checks**:
+  - **Aadhaar QR Code**: Verified offline using Node.js `zlib` decompression and public key certificate signature validation (no UIDAI server calls needed).
+  - **Passport MRZ**: Validated using ICAO Doc 9303 check-digit checksum algorithm across document number, date of birth, and expiry date fields.
 
 ---
 
-### 🗺️ Phase 2: Interactive Map & Telemetry Pipeline (v0.4)
-Renders a live vector map displaying tourist positions, high-risk danger zones, active incidents, and patrol units.
+## 4. Spatial Geofencing Engine (`lib/geospatial.ts`)
 
-* **Tech Stack**: MapLibre GL JS + Leaflet + OpenStreetMap tiles + Turf.js.
-* **Map Layer Elements**:
-  - 🟢 **Tourist Marker**: Live location of monitored traveller.
-  - 🔴 **High-Risk Zones**: Polygon overlays indicating restricted/hazardous areas.
-  - 🟠 **Active Incidents**: Incident markers with severity pulses.
-  - 🚓 **Responders**: Live positions of assigned police, medical, and SAR patrol units.
+Evaluates whether GPS coordinates intersect with active restricted or high-risk polygons using **Turf.js**.
+
+* **Coordinate System Notice**: Leaflet uses `[lat, lng]`, whereas GeoJSON / Turf.js requires `[lng, lat]`. The engine automatically flips coordinates before polygon evaluation.
+* **Polygon Loop Closure**: Ensures the first and last point match to close the linear ring:
+  ```typescript
+  if (turfCoords[0][0] !== turfCoords[turfCoords.length - 1][0] ||
+      turfCoords[0][1] !== turfCoords[turfCoords.length - 1][1]) {
+    turfCoords.push(turfCoords[0]);
+  }
+  ```
+* **Breach Result Structure**:
+  ```typescript
+  export interface GeofenceCheckResult {
+    isBreached: boolean;
+    breachedZone: GeofenceZone | null;
+    riskPenalty: number;
+    alertMessage: string | null;
+  }
+  ```
 
 ---
 
-### 🎯 Phase 3: Turf.js Geofence Engine (v0.5)
-Evaluates whether GPS coordinates intersect with active restricted or hazard zones.
+## 5. Dynamic Risk Engine (`lib/risk.ts`)
 
-```text
-Tourist GPS Coordinates
-          ↓
-Turf.js Point Object
-          ↓
-Turf.js booleanPointInPolygon(point, geofencePolygon)
-          ↓
-     [INSIDE?]
-     /       \
-   YES        NO
-    ↓          ↓
-- Increase Risk Score (+30)
-- Trigger Danger Alert Banner
-- Broadcast Geofence Breach to Authority
+Calculates a numerical safety score between `0` and `100` using a multi-factor rule-based algorithm:
+
+$$\text{Risk Score} = \min\left(100, \text{Geofence Risk} + \text{Time Risk} + \text{Crime Risk} + \text{Anomaly Risk} + \text{Disaster Risk}\right)$$
+
+### Scoring Factors:
+1. **Geofence Breach**:
+   - `CRITICAL` Severity: `+40`
+   - `HIGH` Severity: `+30`
+   - `MEDIUM` Severity: `+15`
+2. **Night-Time Factor**:
+   - Active if local hour is between 22:00 (10 PM) and 05:00 (5 AM): `+10`
+3. **Crime Density Index**:
+   - Micro-incident density score: `0` to `30`
+4. **Route Anomaly Score**:
+   - Deviation score from typical route: `0` to `20`
+5. **Active Disaster Warning**:
+   - Flood / Landslide / Forest Fire alert: `+20`
+
+### Tiers & Badge Display:
+- `0 – 30`: 🟢 **LOW** (`#10b981`)
+- `31 – 60`: 🟡 **MODERATE** (`#eab308`)
+- `61 – 80`: 🟠 **HIGH** (`#f97316`)
+- `81 – 100`: 🔴 **CRITICAL** (`#ef4444`)
+
+---
+
+## 6. Core Database Schemas (MongoDB / Mongoose)
+
+The platform relies on 5 core collections in MongoDB Atlas (`prahari` database):
+
+### 1. `tourists` Collection
+```typescript
+{
+  touristId: { type: String, required: true, unique: true },
+  name: { type: String, required: true },
+  nationality: { type: String, default: 'India' },
+  identityStatus: { type: String, enum: ['verified', 'pending', 'flagged', 'revoked'], default: 'verified' },
+  emergencyContacts: [{ name: String, phone: String, relationship: String }],
+  accommodation: { hotelName: String, address: String, city: String },
+  preferences: { language: String, notificationMode: String, medicalNotes: String },
+  trackingConsent: { type: Boolean, default: true },
+  status: { type: String, enum: ['SAFE', 'WARN', 'SOS'], default: 'SAFE' },
+  riskScore: { type: Number, default: 15 },
+  clothingProfile: {
+    top: String,
+    bottom: String,
+    footwear: String,
+    accessories: String,
+    updatedAt: Date
+  }
+}
+```
+
+### 2. `incidents` Collection
+```typescript
+{
+  incidentId: { type: String, required: true, unique: true },
+  touristId: { type: String, required: true },
+  touristName: String,
+  type: { type: String, enum: ['SOS', 'geofence_breach', 'medical', 'theft', 'PANIC', 'HAZARD'], default: 'SOS' },
+  status: { type: String, enum: ['new', 'assigned', 'in_progress', 'resolved', 'ACTIVE', 'DISPATCHED'], default: 'new' },
+  location: { lat: Number, lng: Number, address: String },
+  severity: { type: String, enum: ['low', 'medium', 'high', 'critical', 'CRITICAL'], default: 'critical' },
+  riskScore: { type: Number, default: 91 },
+  assignedResponder: String,
+  assignedResponderUnitId: String,
+  assignedResponderName: String,
+  etaMinutes: Number,
+  resolvedAt: Date,
+  efirDraft: {
+    efirId: String,
+    passportAadhaar: String,
+    incidentType: String,
+    clothingProfile: String,
+    status: String,
+    policeVerification: String,
+    createdAt: Date
+  }
+}
+```
+
+### 3. `geofences` Collection
+```typescript
+{
+  name: { type: String, required: true },
+  type: { type: String, enum: ['safe_zone', 'restricted', 'high_risk', 'hazard'], default: 'high_risk' },
+  geometry: {
+    type: { type: String, enum: ['Polygon'], default: 'Polygon' },
+    coordinates: { type: Schema.Types.Mixed, required: true }
+  },
+  severity: { type: String, enum: ['low', 'medium', 'high', 'critical'], default: 'high' },
+  active: { type: Boolean, default: true },
+  metadata: { description: String, advisoryMsg: String, speedLimit: Number }
+}
+```
+
+### 4. `locations` Collection
+```typescript
+{
+  touristId: { type: String, required: true, index: true },
+  coordinates: { lat: { type: Number, required: true }, lng: { type: Number, required: true } },
+  accuracy: { type: Number, default: 5 },
+  source: { type: String, enum: ['gps', 'cellular', 'manual'], default: 'gps' },
+  timestamp: { type: Date, default: Date.now }
+}
+```
+
+### 5. `responders` Collection
+```typescript
+{
+  responderId: { type: String, required: true, unique: true },
+  unitId: String,
+  name: String,
+  department: { type: String, enum: ['Police', 'Medical', 'Search & Rescue', 'Tourism Patrol'] },
+  location: { lat: Number, lng: Number },
+  status: { type: String, enum: ['available', 'dispatched', 'off_duty'] },
+  capabilities: [String]
+}
 ```
 
 ---
 
-### 🚨 Phase 4: Emergency SOS Panic Trigger (v0.6)
-The primary emergency trigger mechanism.
+## 7. Ethereum Sepolia Smart Contracts (`packages/contracts`)
 
-* **API Endpoint**: `POST /api/incidents`
-* **Request Payload**:
-  ```json
-  {
-    "type": "PANIC",
-    "touristId": "DTI-IND-000123",
-    "location": { "lat": 19.0760, "lng": 72.8777 },
-    "severity": "CRITICAL",
-    "status": "ACTIVE"
-  }
-  ```
-* **Cascade Actions**:
-  1. Create `Incident` record in MongoDB.
-  2. Execute `findNearestResponder()` using geodesic distance calculations.
-  3. Emit `incident:create` event via Socket.IO gateway.
-  4. Flash incident card and highlight emergency route on Command Center dashboard.
+Incident evidence and geofences are anchored to the Ethereum Sepolia testnet to provide tamper-proof, legally auditable records.
+
+### Cryptographic Evidence Hashing Formula:
+$$\text{Incident Hash} = \text{keccak256}(\text{abi.encodePacked}(\text{incidentId}, \text{touristId}, \text{timestamp}, \text{evidenceHash}))$$
+
+### Contracts Matrix:
+1. `IncidentRegistry.sol`: On-chain registry recording incident hashes and lifecycle status changes.
+2. `GeofenceRegistry.sol`: Government access-controlled registry for publishing official hazard zone polygon hashes.
+3. `ResponderRegistry.sol`: Accredited responder unit verification ledger.
+4. `TouristIdentityRegistry.sol`: Credential revocation status tracker.
 
 ---
 
-### 🧮 Phase 5: Deterministic Risk Engine (v0.9)
-Calculates a numerical risk score (0-100) using a transparent rule-based algorithm:
+## 8. Realtime WebSocket Gateway (`apps/realtime`)
 
-$$\text{Risk Score} = \text{Geofence Risk} + \text{Time Risk} + \text{Crime Density} + \text{Route Anomaly} + \text{Disaster Warning}$$
+The Express + Socket.IO server runs on port `3001`.
 
-* **Risk Tiers**:
-  - `0 – 30`: 🟢 **LOW**
-  - `31 – 60`: 🟡 **MODERATE**
-  - `61 – 80`: 🟠 **HIGH**
-  - `81 – 100`: 🔴 **CRITICAL**
+### Event Handlers (`apps/realtime/src/index.js`):
+* `tourist:location`: Broadcasts live GPS telemetry.
+* `incident:create`: Emits new emergency panic alerts to all authority dashboards.
+* `incident:update`: Emits responder assignment and status updates.
 
 ---
 
-### 🤖 Phase 6: Machine Learning Risk Service (`services/ml`) (v1.1)
-FastAPI service calculating movement pattern anomaly scores and risk classification.
+## 9. Machine Learning Risk Service (`services/ml`)
+
+A Python 3.11 FastAPI service using scikit-learn Isolation Forest classifiers to identify movement anomalies.
 
 * **Endpoint**: `POST http://localhost:8000/risk-score`
-* **Request Payload**:
+* **Request Body**:
   ```json
   {
     "route_deviation_m": 150.0,
@@ -243,7 +326,7 @@ FastAPI service calculating movement pattern anomaly scores and risk classificat
     "hour_of_day": 23
   }
   ```
-* **Response**:
+* **Response Payload**:
   ```json
   {
     "score": 88,
@@ -254,96 +337,40 @@ FastAPI service calculating movement pattern anomaly scores and risk classificat
 
 ---
 
-### ⛓️ Phase 7: Sepolia Smart Contracts Audit Ledger (`packages/contracts`) (v1.4)
-Preserves incident evidence and geofence integrity without storing sensitive personal identity data on-chain.
+## 10. API Route Handlers Specification
 
-* **Architecture Rule**: **Never store raw personal data or unencrypted GPS coordinates on Ethereum.**
-* **Contracts**:
-  1. `IncidentRegistry.sol`: Stores cryptographic incident hashes (`SHA256`) and lifecycle state transitions (`Reported`, `Dispatched`, `Resolved`, `Audited`).
-  2. `GeofenceRegistry.sol`: On-chain registry for government-published hazard boundaries.
-  3. `ResponderRegistry.sol`: Directory for verifying accredited emergency responder units.
-  4. `TouristIdentityRegistry.sol`: On-chain verifiable credential status tracker (`Active`, `Suspended`, `Revoked`).
-  5. `TouristIdentity.sol`: Identity token contracts.
-
----
-
-## 🗄️ 5. Core Database Models (MongoDB / Mongoose Collections)
-
-The database architecture consists of 5 core collections:
-
-### 1. `tourists` Collection
-- `touristId`: Unique string identifier (e.g. `DTI-IND-000123`)
-- `name`: Full name of traveller
-- `nationality`: Country of origin
-- `identityStatus`: Verification state (`verified`, `pending`, `flagged`, `revoked`)
-- `emergencyContacts`: Array of `{ name, phone, relationship }`
-- `accommodation`: Object `{ hotelName, address, city }`
-- `preferences`: Object `{ language, notificationMode, medicalNotes }`
-- `trackingConsent`: Boolean flag
-- `status`: Safety state (`SAFE`, `WARN`, `SOS`)
-- `riskScore`: Numerical risk rating (0-100)
-
-### 2. `locations` Collection
-- `touristId`: Reference tourist ID
-- `coordinates`: Coordinates object `{ lat, lng }`
-- `accuracy`: Accuracy in meters
-- `source`: Telemetry source (`gps`, `cellular`, `manual`)
-- `speed`: Speed in km/h
-- `batteryLevel`: Device battery level percentage
-- `timestamp`: Date timestamp
-
-### 3. `geofences` Collection
-- `name`: Boundary title
-- `type`: Classification (`safe_zone`, `restricted`, `high_risk`, `hazard`)
-- `geometry`: GeoJSON object `{ type: "Polygon", coordinates: [...] }`
-- `severity`: Level (`low`, `medium`, `high`, `critical`)
-- `active`: Boolean status
-- `metadata`: `{ description, advisoryMsg, speedLimit, radius }`
-
-### 4. `incidents` Collection
-- `incidentId`: Unique ticket ID (e.g. `INC-1724320000`)
-- `touristId`: Reference tourist ID
-- `type`: Incident category (`SOS`, `PANIC`, `geofence_breach`, `medical`, `HAZARD`)
-- `status`: Lifecycle state (`new`, `assigned`, `in_progress`, `resolved`, `ACTIVE`, `DISPATCHED`)
-- `location`: Location object `{ lat, lng, address }`
-- `severity`: Level (`low`, `medium`, `high`, `critical`)
-- `riskScore`: Calculated risk score
-- `assignedResponderUnitId`: Assigned patrol unit
-- `etaMinutes`: Calculated arrival time
-
-### 5. `responders` Collection
-- `responderId`: Unique unit ID (e.g. `RESP-POLICE-01`)
-- `unitId`: Display unit tag (e.g. `Unit #17`)
-- `department`: Division (`Police`, `Medical`, `Search & Rescue`, `Tourism Patrol`)
-- `location`: Current coordinates `{ lat, lng }`
-- `status`: Operating status (`available`, `dispatched`, `off_duty`)
-- `capabilities`: Array of unit capabilities
-
----
-
-## ⚡ 6. Realtime WebSocket Gateway (`apps/realtime`)
-
-The real-time service coordinates bi-directional communication between travellers and the district command center.
-
-* **Port**: `3001` (configurable via `SOCKET_PORT`)
-* **Events Overview**:
-  - `tourist:location`: Broadcasts live GPS telemetry updates across connected maps.
-  - `incident:create`: Broadcasts new emergency SOS triggers to all authority command dashboards.
-  - `incident:update`: Broadcasts dispatch status changes and responder assignments.
-
----
-
-## 🧪 7. Verification & Test Suite Matrix
-
-| Test ID | Scenario | Verification Procedure | Expected Outcome |
+| Route Path | Method | Purpose | Response Payload Key |
 | :--- | :--- | :--- | :--- |
-| **TEST-01** | Normal Movement | Tourist moves inside designated safe zone | Risk score remains Low (🟢), no alerts generated |
-| **TEST-02** | Geofence Breach | Tourist crosses into high-risk zone polygon | Push warning triggered, map flashes red, risk score updates (+30) |
-| **TEST-03** | SOS Panic Trigger | Tap 🚨 SOS button on Tourist app | `POST /api/incidents` succeeds, WebSocket emits `incident:create`, command center alert plays |
-| **TEST-04** | Responder Dispatch | Authority clicks DISPATCH on active incident | Nearest responder assigned, ETA computed, status changed to `DISPATCHED` |
-| **TEST-05** | ML Risk API | Query `POST /risk-score` on `services/ml` | Returns JSON risk score and `requires_human_review` flag |
-| **TEST-06** | Sepolia Smart Contract | Execute `registerGeofence()` or `anchorIncident()` | Hardhat posts transaction hash to Sepolia testnet |
-| **TEST-07** | Monorepo Build | Run `pnpm build` at monorepo root | All apps (`web`, `realtime`) and packages (`contracts`) compile with zero errors |
+| `/api/geofences` | `GET` | Fetch active geofence polygons | `{ success: true, geofences: [...] }` |
+| `/api/geofences` | `POST` | Create new government geofence | `{ success: true, geofence: {...} }` |
+| `/api/incidents` | `GET` | Fetch active incident queue | `{ success: true, incidents: [...] }` |
+| `/api/incidents` | `POST` | Trigger emergency SOS panic | `{ success: true, incident: {...} }` |
+| `/api/locations` | `POST` | Ingest tourist GPS telemetry | `{ success: true, ping: {...} }` |
+| `/api/tourists/[id]`| `GET` | Lookup tourist identity & DID | `{ success: true, tourist: {...} }` |
+| `/api/efir` | `POST` | Generate automated draft E-FIR | `{ success: true, efir: {...} }` |
+| `/api/attire` | `POST` | Save AI visual clothing profile | `{ success: true, clothingProfile: {...} }` |
+
+---
+
+## 11. Verification & Operations Guide
+
+### Developer Setup Commands:
+```bash
+# 1. Install workspace dependencies
+pnpm install
+
+# 2. Start full development stack (web + realtime gateway)
+pnpm dev
+
+# 3. Start Python ML Anomaly Service
+pnpm ml:dev
+
+# 4. Compile Hardhat Sepolia Smart Contracts
+pnpm contract:compile
+
+# 5. Build Next.js Production Bundle
+pnpm --filter @prahari/web build
+```
 
 ---
 
