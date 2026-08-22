@@ -294,3 +294,64 @@ export async function logCredentialIssuance(row: {
   if (error) { console.warn("[prahari] logCredentialIssuance:", error.message); return false; }
   return true;
 }
+
+// ------------------------------------------------------------------ users
+export interface UserRow {
+  id?: string;
+  userId: string;
+  email: string;
+  passwordHash: string;
+  salt: string;
+  name: string;
+  role: 'admin' | 'authority' | 'responder' | 'tourist';
+  entityId?: string | null;
+  department?: string | null;
+  badge?: string | null;
+  phone?: string | null;
+  active?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export async function getUserByEmail(email: string): Promise<UserRow | null> {
+  const sb = getSupabase();
+  if (!sb) return null;
+  const { data, error } = await sb
+    .from("users")
+    .select("*")
+    .eq("email", email.toLowerCase().trim())
+    .maybeSingle();
+  if (error) { console.warn("[prahari] getUserByEmail:", error.message); return null; }
+  return (data as UserRow) ?? null;
+}
+
+export async function getUserById(userId: string): Promise<UserRow | null> {
+  const sb = getSupabase();
+  if (!sb) return null;
+  const { data, error } = await sb
+    .from("users")
+    .select("*")
+    .eq("userId", userId)
+    .maybeSingle();
+  if (error) { console.warn("[prahari] getUserById:", error.message); return null; }
+  return (data as UserRow) ?? null;
+}
+
+export async function upsertUser(user: UserRow): Promise<boolean> {
+  const sb = getSupabase();
+  if (!sb) return false;
+  const { error } = await sb
+    .from("users")
+    .upsert({ ...user, email: user.email.toLowerCase().trim(), updatedAt: new Date().toISOString() }, { onConflict: "userId" });
+  if (error) { console.warn("[prahari] upsertUser:", error.message); return false; }
+  return true;
+}
+
+export async function listUsers(): Promise<UserRow[]> {
+  const sb = getSupabase();
+  if (!sb) return [];
+  const { data, error } = await sb.from("users").select("*");
+  if (error) { console.warn("[prahari] listUsers:", error.message); return []; }
+  return (data as UserRow[]) ?? [];
+}
+

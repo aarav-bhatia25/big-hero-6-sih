@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { listActiveGeofences, insertGeofence } from "@/lib/db";
+import { requireAuth } from "@/lib/auth/guards";
 
 export async function GET() {
   try {
@@ -55,7 +56,10 @@ export async function GET() {
   }
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
+  const auth = requireAuth(request, ['authority', 'admin']);
+  if (auth.errorResponse) return auth.errorResponse;
+
   try {
     const body = await request.json();
     const { name, type, severity, coordinates, description, geometry } = body;
@@ -84,3 +88,4 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: false, error: err.message || 'Error creating geofence' }, { status: 500 });
   }
 }
+

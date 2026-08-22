@@ -4,6 +4,7 @@ import { issueCredential } from "@/lib/identity/credential";
 import {
   upsertTourist, getTouristBySubjectHash, logCredentialIssuance, isSupabaseConfigured,
 } from "@/lib/db";
+import { createSessionToken, setSessionCookie } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
@@ -76,7 +77,16 @@ export async function POST(request: NextRequest) {
       action: existing ? "reinstated" : "issued",
     });
 
-    return NextResponse.json({
+    const sessionToken = createSessionToken({
+      userId: touristId,
+      role: 'tourist',
+      name: subject.fullName,
+      touristId,
+      entityId: touristId,
+      did: issued.did,
+    });
+
+    const response = NextResponse.json({
       ok: true,
       touristId,
       did: issued.did,
@@ -84,7 +94,12 @@ export async function POST(request: NextRequest) {
       expiresAt: issued.expiresAt,
       credential: issued.credential,
       reissued: Boolean(existing),
+      token: sessionToken,
     });
+
+    setSessionCookie(response, sessionToken);
+
+    return response;
   } catch (error: any) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }

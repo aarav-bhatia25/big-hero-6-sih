@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import {
   ShieldCheck,
@@ -16,12 +16,16 @@ import {
   Mic,
   PhoneCall,
   Building2,
+  AlertTriangle,
+  LogOut,
 } from 'lucide-react';
 import DigitalIdCard from '@/components/tourist/DigitalIdCard';
 import SosButton from '@/components/tourist/SosButton';
 import MapView from '@/components/maps/MapView';
 import { calculateDeterministicRisk } from '@/lib/risk';
 import { checkPointInGeofence } from '@/lib/geospatial';
+import { fetchMLRiskScore, type MLRiskResult } from '@/lib/services/mlRiskClient';
+import { getSocket } from '@/lib/socket';
 
 export default function CitizenPage() {
   const [greeting, setGreeting] = useState('Good morning, Tourist');
@@ -49,6 +53,14 @@ export default function CitizenPage() {
   const [listening, setListening] = useState(false);
   const [voiceText, setVoiceText] = useState('');
   const [selectedLang, setSelectedLang] = useState('Hindi (हिंदी)');
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+
+  // ML Risk State
+  const [mlRisk, setMlRisk] = useState<MLRiskResult | null>(null);
+  const [riskSource, setRiskSource] = useState<'local' | 'ml'>('local');
+
+  // Geofence breach dedup guard
+  const breachCreatedRef = useRef(false);
 
   // Geofence & Risk State
   const [geofences, setGeofences] = useState<any[]>([]);
@@ -123,11 +135,67 @@ export default function CitizenPage() {
   }));
 
   const gfCheck = checkPointInGeofence(coords.lat, coords.lng, formattedGeofences);
+
+  // ── ML risk scoring with graceful fallback ──────────────────────
+  useEffect(() => {
+    const fetchRisk = async () => {
+      const result = await fetchMLRiskScore({
+        zone_risk: gfCheck.riskPenalty,
+        hour_of_day: new Date().getHours(),
+        route_deviation_m: 0,
+        inactivity_minutes: 0,
+      });
+      if (result) {
+        setMlRisk(result);
+        setRiskSource('ml');
+      } else {
+        setRiskSource('local');
+      }
+    };
+    fetchRisk();
+  }, [gfCheck.isBreached, gfCheck.riskPenalty]);
+
   const riskEval = calculateDeterministicRisk({
     inGeofence: gfCheck.isBreached,
     geofenceSeverity: gfCheck.breachedZone?.severity,
-    crimeDensityIndex: 15,
+    crimeDensityIndex: mlRisk ? Math.min(30, mlRisk.score * 0.3) : 15,
+    routeAnomalyScore: mlRisk ? Math.min(20, mlRisk.score * 0.2) : 0,
   });
+
+  // ── Auto-create incident on geofence breach (#20) ──────────────
+  useEffect(() => {
+    if (gfCheck.isBreached && gfCheck.breachedZone && !breachCreatedRef.current && touristId) {
+      breachCreatedRef.current = true;
+      const createBreachIncident = async () => {
+        try {
+          const res = await fetch('/api/incidents', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              type: 'GEOFENCE_BREACH',
+              touristId,
+              touristName: tourist?.name || touristId,
+              location: { lat: coords.lat, lng: coords.lng, address: `Inside ${gfCheck.breachedZone!.name}` },
+              severity: gfCheck.breachedZone!.severity,
+              status: 'ACTIVE',
+            }),
+          });
+          const data = await res.json();
+          if (data.success && data.incident) {
+            setActiveIncident(data.incident);
+            // Emit to socket for real-time dashboard update
+            try { getSocket().emit('incident:create', data.incident); } catch {}
+          }
+        } catch (err) {
+          console.error('[prahari] breach incident creation failed:', err);
+        }
+      };
+      createBreachIncident();
+    }
+    if (!gfCheck.isBreached) {
+      breachCreatedRef.current = false;
+    }
+  }, [gfCheck.isBreached, gfCheck.breachedZone, touristId, coords.lat, coords.lng, tourist?.name]);
 
   // Handle Save Clothing Profile
   const handleSaveAttire = async (e: React.FormEvent) => {
@@ -177,15 +245,86 @@ export default function CitizenPage() {
     }
   };
 
-  // Simulate Sarvam Voice Recognition
-  const handleStartVoice = () => {
-    setListening(true);
-    setVoiceText('Recognizing speech via Sarvam AI...');
-    setTimeout(() => {
-      setVoiceText('\"मुझे आपातकालीन सहायता की आवश्यकता है!\" (Emergency Help Needed)');
-      setListening(false);
-    }, 2000);
+  // ── Web Speech API for real multilingual voice SOS (#24) ───────
+  const recognitionRef = useRef<any>(null);
+
+  const LANG_MAP: Record<string, string> = {
+    'Hindi (हिंदी)': 'hi-IN',
+    'Marathi (मराठी)': 'mr-IN',
+    'Bengali (বাংলা)': 'bn-IN',
+    'Tamil (தமிழ்)': 'ta-IN',
+    'Telugu (తెలుగు)': 'te-IN',
+    'Gujarati (ગુજરાતી)': 'gu-IN',
+    'Kannada (ಕನ್ನಡ)': 'kn-IN',
+    'English': 'en-IN',
   };
+
+  const handleStartVoice = useCallback(() => {
+    setVoiceError(null);
+
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      setVoiceError('Speech recognition is not supported in this browser. Please use Chrome or Edge.');
+      return;
+    }
+
+    // Stop previous recognition if running
+    if (recognitionRef.current) {
+      try { recognitionRef.current.abort(); } catch {}
+    }
+
+    const recognition = new SpeechRecognition();
+    recognitionRef.current = recognition;
+    recognition.lang = LANG_MAP[selectedLang] || 'hi-IN';
+    recognition.interimResults = true;
+    recognition.continuous = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => {
+      setListening(true);
+      setVoiceText('Listening... speak now');
+    };
+
+    recognition.onresult = (event: any) => {
+      let interim = '';
+      let final = '';
+      for (let i = 0; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          final += transcript;
+        } else {
+          interim += transcript;
+        }
+      }
+      setVoiceText(final || interim || 'Listening...');
+    };
+
+    recognition.onerror = (event: any) => {
+      setListening(false);
+      if (event.error === 'not-allowed') {
+        setVoiceError('Microphone access denied. Please allow microphone permissions.');
+      } else if (event.error === 'no-speech') {
+        setVoiceError('No speech detected. Please try again.');
+      } else {
+        setVoiceError(`Speech recognition error: ${event.error}`);
+      }
+    };
+
+    recognition.onend = () => {
+      setListening(false);
+    };
+
+    recognition.start();
+  }, [selectedLang]);
+
+  const handleStopVoice = useCallback(() => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+    }
+    setListening(false);
+  }, []);
 
   return (
     <div className="min-h-screen bg-[#F7F5F0] text-[#14213D] font-sans selection:bg-[#14213D] selection:text-white pb-12">
@@ -225,6 +364,17 @@ export default function CitizenPage() {
           >
             <Radio className="w-3.5 h-3.5" /> Authority Command Portal →
           </Link>
+
+          <button
+            onClick={async () => {
+              await fetch('/api/auth/logout', { method: 'POST' });
+              window.location.href = '/login';
+            }}
+            title="Logout"
+            className="p-2 bg-white hover:bg-red-50 text-slate-600 hover:text-red-600 rounded border border-[#D8D2C4] hover:border-red-300 transition cursor-pointer"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
         </div>
       </header>
 
@@ -285,6 +435,9 @@ export default function CitizenPage() {
             </div>
             <p className="text-[11px] font-mono text-slate-500">
               {gfCheck.isBreached ? '⚠️ HIGH RISK GEOFENCE BREACH DETECTED' : 'SAFE TRAVEL CORRIDOR • NO ACTIVE BREACH'}
+            </p>
+            <p className="text-[10px] font-mono text-slate-400 mt-1">
+              SOURCE: {riskSource === 'ml' ? '🧠 ML SERVICE' : '📊 LOCAL ENGINE'}
             </p>
           </div>
         </div>
@@ -570,14 +723,28 @@ export default function CitizenPage() {
 
               <div className="bg-[#F7F5F0] p-4 rounded border border-[#D8D2C4] text-center space-y-3">
                 <button
-                  onClick={handleStartVoice}
-                  className={`w-16 h-16 rounded-full mx-auto flex items-center justify-center transition border ${
-                    listening ? 'bg-[#FF7722] text-white border-amber-600' : 'bg-[#14213D] text-white hover:bg-[#1C2D52]'
+                  onClick={listening ? handleStopVoice : handleStartVoice}
+                  className={`w-16 h-16 rounded-full mx-auto flex items-center justify-center transition border cursor-pointer ${
+                    listening ? 'bg-[#FF7722] text-white border-amber-600 animate-pulse' : 'bg-[#14213D] text-white hover:bg-[#1C2D52]'
                   }`}
                 >
                   <Mic className="w-6 h-6" />
                 </button>
-                <p className="text-xs text-slate-600 font-mono">{voiceText || 'Tap microphone to dictate emergency message...'}</p>
+                <p className="text-xs text-slate-600 font-mono">
+                  {listening ? '🔴 RECORDING — tap again to stop' : (voiceText || 'Tap microphone to dictate emergency message...')}
+                </p>
+                {voiceText && !listening && (
+                  <div className="bg-white p-3 rounded border border-[#D8D2C4] text-left">
+                    <span className="text-[10px] font-mono text-slate-500 uppercase block font-bold mb-1">TRANSCRIBED TEXT</span>
+                    <p className="text-sm text-[#14213D] font-medium">{voiceText}</p>
+                  </div>
+                )}
+                {voiceError && (
+                  <div className="flex items-center gap-1.5 text-xs text-red-600 font-mono justify-center">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    {voiceError}
+                  </div>
+                )}
               </div>
             </div>
           </div>

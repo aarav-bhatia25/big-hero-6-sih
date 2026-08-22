@@ -1,9 +1,13 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { listResponders } from "@/lib/db";
+import { requireAuth } from "@/lib/auth/guards";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const auth = requireAuth(request, ['authority', 'admin', 'responder']);
+  if (auth.errorResponse) return auth.errorResponse;
+
   try {
     const responders = await listResponders();
     return NextResponse.json({ success: true, responders });
@@ -11,3 +15,4 @@ export async function GET() {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
+

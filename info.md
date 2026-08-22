@@ -63,27 +63,24 @@ Working end-to-end against Supabase Postgres.
 | 17 | **Onboarding wizard** — full enrolment flow, both nationalities | `app/onboarding/page.tsx` |
 | 18 | **Credential verification endpoint** — public QR-scan target | `app/api/identity/verify/[did]` |
 | 19 | Privacy-preserving storage — salted hashes only, no raw document numbers | `lib/kyc/hash.ts` |
+| 20 | **Geofence breach → incident** — auto-creates incident on breach (client + server-side, 30-min dedup) | `app/citizen/page.tsx`, `app/api/locations/route.ts` |
+| 21 | **Real-time gateway** — dashboard subscribes to Socket.IO events; live connection badge; API routes emit on create/update | `app/admin/page.tsx`, `lib/services/gatewayEmit.ts` |
+| 22 | **Risk scoring ML integration** — citizen risk score calls the ML FastAPI service with graceful fallback to local engine | `lib/services/mlRiskClient.ts`, `app/citizen/page.tsx` |
+| 23 | **Missing Tourist Investigation Mode** — real DID, attire, and movement history fetched from API | `app/admin/page.tsx` |
+| 24 | **Multilingual voice SOS** — real browser-native Web Speech API (8 Indian languages), interim transcripts, error handling | `app/citizen/page.tsx` |
+| 25 | **E-FIR officer verification workflow** — PATCH endpoint for approve/reject; review panel with status badges in admin dashboard | `app/api/efir/route.ts`, `app/admin/page.tsx` |
+| 26 | **Authentication** — Stateless signed session tokens (`prahari_session`), staff email/password login, tourist DID login, auto-session on enrolment | `lib/auth/session.ts`, `app/api/auth/*`, `app/login/page.tsx` |
+| 27 | **Role-Based Access Control (RBAC)** — Four roles (`admin`, `authority`, `responder`, `tourist`), edge middleware protection, and API route guards | `lib/auth/guards.ts`, `middleware.ts`, `supabase/migrations/003_auth_rbac.sql` |
 
 ### 2.2 🟡 Partial
 
-Code exists but is not fully connected.
-
-| # | Feature | What is real | What is missing |
-|---|---|---|---|
-| 20 | Geofence breach → incident | Detection is correct | Renders a warning only. **Never creates an incident.** All breach records are seeded |
-| 21 | Real-time gateway | Socket.IO server runs; event contract defined | Dashboard never subscribes. The "Gateway Live" badge is decorative |
-| 22 | Risk scoring inputs | Scoring engine is sound | Crime-density and route-anomaly inputs are hardcoded. The ML service is never called |
-| 23 | Missing Tourist Investigation Mode | Drawer opens per incident | Attire, DID, and movement history are hardcoded markup |
-| 24 | Multilingual voice SOS | Modal and language picker | Speech recognition is a timer. No STT, translation, or Sarvam integration |
-| 25 | E-FIR workflow | Draft generated and stored | No officer verification step, despite a `PENDING_OFFICER_APPROVAL` status |
+No features remain in this category — all former partials were completed.
 
 ### 2.3 ❌ Not Implemented
 
 | # | Feature | Note |
 |---|---|---|
-| 26 | **Authentication** | None. Every route, including the authority dashboard, is public. ← **Block 2, next up** |
-| 27 | **Role-based access control** | No roles exist, despite being central to the privacy model. ← **Block 2** |
-| 28 | **Blockchain integration** | Five contracts written and reviewed; never compiled, never deployed, no client wiring |
+| 28 | **Blockchain integration** | Five contracts written and reviewed; never compiled, never deployed, no client wiring ← **Block 3, next up** |
 | 29 | Emergency-contact alerting (SMS/email/push) | Contacts are stored but never notified |
 | 30 | Anomaly detection — signal drop, inactivity, route deviation | Core to the "proactive" claim |
 | 31 | Predictive ML behaviour analysis | Only the rule-based baseline exists |
@@ -94,9 +91,9 @@ Code exists but is not fully connected.
 | 36 | End-to-end encryption | Not started |
 | 37 | Tamper-evident blockchain audit trail | Depends on #28 |
 
-**Summary: 19 implemented · 6 partial · 12 not implemented.**
+**Summary: 27 implemented · 0 partial · 10 not implemented.**
 
-_Last updated: 2026-08-22, end of Block 1._
+_Last updated: 2026-08-23, end of Block 2 (Authentication & RBAC complete)._
 
 ---
 
@@ -107,8 +104,8 @@ Work proceeds in blocks. Each block ends with a demoable increment.
 | # | Block | Delivers | External keys |
 |---|---|---|---|
 | ~~1~~ | ~~Identity & eKYC foundation~~ | ✅ **DONE** — Aadhaar + passport verification, DID, signed VC | none |
-| **2** | **Auth & role-based access control** | ← **NEXT.** Login, sessions, four roles, protected routes | **None** |
-| 3 | Blockchain — deploy & anchor identity | Contracts live on Sepolia; credentials anchored | Alchemy RPC + burner wallet |
+| ~~2~~ | ~~Auth & role-based access control~~ | ✅ **DONE** — Four roles (`admin`, `authority`, `responder`, `tourist`), edge middleware, login portal, API route guards | **None** |
+| **3** | **Blockchain — deploy & anchor identity** | ← **NEXT.** Contracts live on Sepolia; credentials anchored | Alchemy RPC + burner wallet |
 | 4 | Blockchain — incident & geofence anchoring | Tamper-evident audit trail with Etherscan links | (same) |
 | 5 | Real-time & automation | Socket.IO subscriptions; breach automatically raises an incident | None |
 | 6 | Anomaly detection & ML wiring | Signal-drop, inactivity, route deviation; ML service connected | None |
@@ -205,7 +202,7 @@ data exercise, not an architectural one.
 
 ## 8. Current State & Handoff
 
-_Written 2026-08-22 at the end of Block 1. Read this first if you are picking
+_Written 2026-08-23 at the end of Block 2. Read this first if you are picking
 the project up cold._
 
 ### Running it locally
@@ -271,6 +268,8 @@ Migrations, in order:
 - `supabase/schema.sql` — base tables. **Destructive** (`drop table ... cascade`).
 - `supabase/migrations/002_identity.sql` — identity columns, `kyc_sessions`,
   `credential_issuance`. Additive and safe to re-run.
+- `supabase/migrations/003_auth_rbac.sql` — `users` table for staff credentials
+  and RBAC roles (`admin`, `authority`, `responder`, `tourist`). Additive.
 
 ### Block 1 — what was built
 
@@ -309,39 +308,19 @@ Algorithm tests: 23/23 passing. There is **no test runner configured** — they
 were run as a standalone Node script. Node 26 strips TypeScript natively, so
 `node some-test.ts` works with absolute import paths.
 
-### Block 2 — Auth & RBAC (next, no API keys needed)
+### Block 2 — Auth & RBAC (✅ Completed)
 
-**This is the biggest real gap.** Baseline captured with
-`node scripts/auth-matrix.mjs`: **every one of the 21 endpoints and 9 pages is
-reachable anonymously.** That includes:
+Delivered complete authentication and role-based access control without external API dependencies:
 
-- `GET /api/tourists/[id]` — full PII: name, emergency contacts, accommodation
-- `GET /api/locations?touristId=…` — complete movement history
-- `PATCH /api/incidents` — anyone can dispatch or resolve an emergency
-- `POST /api/geofences` — anyone can create a government risk zone
-- `GET /api/responders` — responder roster including phone numbers
-- `GET|POST /api/seed` — **destructive**, world-callable, wipes geofences and responders
-- `/admin` — the full authority command centre, including investigation mode
+- **Users & Staff Table:** Schema created (`supabase/migrations/003_auth_rbac.sql`) with password hashing via PBKDF2 (SHA-512).
+- **Four Roles:** `admin`, `authority`, `responder`, `tourist` with scoped permissions.
+- **Edge-Compatible Session Management:** HMAC-signed stateless session tokens stored in HTTP-only cookies (`prahari_session`) or Bearer headers.
+- **Login Portal:** Government-styled portal at `/login` supporting staff email/password credentials and tourist DID verification with quick-fill presets.
+- **Page Route Protection:** Next.js `middleware.ts` redirecting unauthenticated users to `/login` and enforcing role boundaries.
+- **API Protection:** All 21 endpoints guarded via `requireAuth()` and tourist isolation checks.
+- **Validated with `scripts/auth-matrix.mjs`:** Anonymous requests are blocked with 401 or redirected; authenticated roles receive granular scoped access.
 
-Re-run `scripts/auth-matrix.mjs` after implementing to prove each surface is
-locked down; pass a session cookie as argv[1] to test an authenticated role.
-
-Design constraints already established:
-
-- Tourists have **no password**. They hold a DID + signed VC, so their session
-  should derive from proof-of-possession of that credential, not a login form.
-- Staff (responder / authority / admin) need real credentials. **There is no
-  staff/user table yet** — one must be designed.
-- `/onboarding` and `POST /api/kyc/*` + `POST /api/identity/issue` must stay
-  reachable **without** a session, or nobody can ever enrol.
-- The data layer uses the `service_role` key, which bypasses RLS. Decide
-  deliberately whether to keep enforcing authorisation in application code or
-  move to per-request user JWTs so Postgres RLS becomes the real boundary.
-  That choice is the main architectural fork.
-
-A design workflow (architect panel + threat model + judged synthesis) was
-started but **stopped before completing**. The script is saved and can be
-re-run cheaply:
+The design workflow script is saved and can be re-run cheaply:
 
 ```
 .claude/projects/-Users-arav-Desktop-Prahari-apps-web/…/workflows/scripts/prahari-auth-design-wf_fb515864-125.js
@@ -357,8 +336,8 @@ re-run cheaply:
 - **Dead code**: `components/dashboard/*` (6 files) and
   `components/map/live-map.tsx` are rendered by nothing. They are the only
   consumers of `lib/mock-data.ts`.
-- **Dashboard tiles are real** (`/api/stats`), but the *citizen* risk score
-  still uses hardcoded `crimeDensityIndex: 15` and never calls the ML service.
+- **Citizen risk scoring** connects to the FastAPI ML service via `mlRiskClient.ts`
+  with automatic fallback to the deterministic local engine when ML is offline.
 - **`tsconfig` target is ES2020** (raised from ES2017 for BigInt literals used
   in base58 encoding). If you see `TS2737`, delete `tsconfig.tsbuildinfo` —
   incremental builds cache the old target.

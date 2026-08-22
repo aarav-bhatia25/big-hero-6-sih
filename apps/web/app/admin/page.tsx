@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import Link from 'next/link';
 import {
   ShieldAlert,
@@ -21,12 +21,18 @@ import {
   MapPin,
   X,
   CheckCircle2,
+  Clock,
+  Ban,
+  LogOut,
+  User,
 } from 'lucide-react';
 import MapView from '@/components/maps/MapView';
 import IncidentQueue from '@/components/authority/IncidentQueue';
 import IncidentDetailModal from '@/components/authority/IncidentDetailModal';
+import { getSocket } from '@/lib/socket';
 
 export default function AdminPage() {
+  const [currentUser, setCurrentUser] = useState<any | null>(null);
   const [incidents, setIncidents] = useState<any[]>([]);
   const [geofences, setGeofences] = useState<any[]>([]);
   const [responders, setResponders] = useState<any[]>([]);
@@ -39,6 +45,20 @@ export default function AdminPage() {
   const [investigationMode, setInvestigationMode] = useState<any | null>(null);
   const [showGeofenceModal, setShowGeofenceModal] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  // Socket.IO realtime state
+  const [socketConnected, setSocketConnected] = useState(false);
+
+  // Investigation mode live data
+  const [investigationData, setInvestigationData] = useState<{
+    tourist: any | null;
+    locations: any[];
+    loading: boolean;
+  }>({ tourist: null, locations: [], loading: false });
+
+  // E-FIR review state
+  const [efirs, setEfirs] = useState<any[]>([]);
+  const [efirLoading, setEfirLoading] = useState(false);
 
   // New Geofence Form State
   const [newGf, setNewGf] = useState({
@@ -108,7 +128,123 @@ export default function AdminPage() {
 
   useEffect(() => {
     fetchDashboardData();
+    // Fetch authenticated user session
+    fetch('/api/auth/me')
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.authenticated && d.user) setCurrentUser(d.user);
+      })
+      .catch(() => {});
   }, []);
+
+  // ── Socket.IO realtime subscription (#21) ────────────────────────
+  useEffect(() => {
+    const socket = getSocket();
+
+    const onConnect = () => setSocketConnected(true);
+    const onDisconnect = () => setSocketConnected(false);
+
+    const onIncidentCreated = (incident: any) => {
+      setIncidents((prev) => {
+        // Dedup: don't add if already present
+        if (prev.some((i) => i.incidentId === incident.incidentId)) return prev;
+        return [incident, ...prev];
+      });
+    };
+
+    const onIncidentUpdated = (incident: any) => {
+      setIncidents((prev) =>
+        prev.map((i) => (i.incidentId === incident.incidentId ? { ...i, ...incident } : i))
+      );
+    };
+
+    const onTouristLocation = (loc: any) => {
+      if (loc?.lat != null && loc?.lng != null) {
+        setTouristPos({ lat: loc.lat, lng: loc.lng });
+      }
+    };
+
+    socket.on('connect', onConnect);
+    socket.on('disconnect', onDisconnect);
+    socket.on('incident:created', onIncidentCreated);
+    socket.on('incident:updated', onIncidentUpdated);
+    socket.on('tourist:location', onTouristLocation);
+
+    if (socket.connected) setSocketConnected(true);
+
+    return () => {
+      socket.off('connect', onConnect);
+      socket.off('disconnect', onDisconnect);
+      socket.off('incident:created', onIncidentCreated);
+      socket.off('incident:updated', onIncidentUpdated);
+      socket.off('tourist:location', onTouristLocation);
+    };
+  }, []);
+
+  // ── Fetch E-FIRs for review panel (#25) ──────────────────────────
+  const fetchEfirs = async () => {
+    try {
+      setEfirLoading(true);
+      const res = await fetch('/api/efir');
+      const data = await res.json();
+      if (data.success && data.efirs) setEfirs(data.efirs);
+    } catch (err) {
+      console.error('Error fetching E-FIRs:', err);
+    } finally {
+      setEfirLoading(false);
+    }
+  };
+
+  useEffect(() => { fetchEfirs(); }, []);
+
+  // ── Investigation mode: fetch live data (#23) ────────────────────
+  useEffect(() => {
+    if (!investigationMode) {
+      setInvestigationData({ tourist: null, locations: [], loading: false });
+      return;
+    }
+    const tid = investigationMode.touristId;
+    if (!tid) return;
+
+    setInvestigationData((prev) => ({ ...prev, loading: true }));
+
+    Promise.all([
+      fetch(`/api/tourists/${tid}`).then((r) => r.json()).catch(() => null),
+      fetch(`/api/locations?touristId=${tid}`).then((r) => r.json()).catch(() => null),
+    ]).then(([touristRes, locRes]) => {
+      setInvestigationData({
+        tourist: touristRes?.tourist ?? touristRes ?? null,
+        locations: locRes?.history ?? [],
+        loading: false,
+      });
+    });
+  }, [investigationMode?.touristId]);
+
+  // ── E-FIR approve/reject handler (#25) ──────────────────────────
+  const handleEfirAction = async (incidentId: string, action: 'APPROVE' | 'REJECT') => {
+    try {
+      const res = await fetch('/api/efir', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          incidentId,
+          action,
+          officerName: 'Authority Officer',
+          officerBadge: 'AUTH-001',
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        // Refresh the E-FIR list
+        fetchEfirs();
+        alert(`E-FIR ${action === 'APPROVE' ? 'approved' : 'rejected'} successfully.`);
+      } else {
+        alert(`E-FIR action failed: ${data.error}`);
+      }
+    } catch (err) {
+      console.error('E-FIR action failed:', err);
+    }
+  };
 
   const handleDispatchAction = async (incidentId: string) => {
     // Pick the nearest available responder we actually have on record.
@@ -194,6 +330,16 @@ export default function AdminPage() {
         </div>
 
         <div className="flex items-center gap-3">
+          {currentUser && (
+            <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-xs font-mono">
+              <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+              <span className="text-slate-300 font-bold">{currentUser.name}</span>
+              <span className="px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-bold text-[10px] uppercase">
+                {currentUser.role}
+              </span>
+            </div>
+          )}
+
           <button
             onClick={() => setShowGeofenceModal(true)}
             className="flex items-center gap-1.5 px-3 py-2 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-bold transition shadow-lg shadow-red-600/20 cursor-pointer"
@@ -214,6 +360,17 @@ export default function AdminPage() {
           >
             Citizen View →
           </Link>
+
+          <button
+            onClick={async () => {
+              await fetch('/api/auth/logout', { method: 'POST' });
+              window.location.href = '/login';
+            }}
+            title="Logout"
+            className="p-2 bg-slate-900 hover:bg-red-950/60 border border-slate-800 hover:border-red-500/40 text-slate-400 hover:text-red-400 rounded-xl transition cursor-pointer"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
         </div>
       </header>
 
@@ -270,8 +427,12 @@ export default function AdminPage() {
             <h3 className="font-bold text-slate-200 text-sm flex items-center gap-2">
               <Radio className="w-4 h-4 text-emerald-400 animate-pulse" /> Live Incident & Responder Spatial Clusters
             </h3>
-            <span className="text-xs font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
-              ● Socket.IO Gateway Live
+            <span className={`text-xs font-mono px-2 py-0.5 rounded border ${
+              socketConnected
+                ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
+                : 'text-red-400 bg-red-500/10 border-red-500/20'
+            }`}>
+              {socketConnected ? '● Gateway Connected' : '○ Gateway Disconnected'}
             </span>
           </div>
 
@@ -303,7 +464,7 @@ export default function AdminPage() {
         </div>
       </div>
 
-      {/* Missing Tourist Investigation Mode Drawer */}
+      {/* Missing Tourist Investigation Mode Drawer — Live Data (#23) */}
       {investigationMode && (
         <div className="glass-panel p-6 rounded-2xl border border-blue-500/30 bg-slate-900/90 shadow-2xl space-y-4">
           <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -326,41 +487,160 @@ export default function AdminPage() {
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-            {/* Identity & DID */}
-            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
-              <span className="font-bold text-blue-400 block uppercase tracking-wider">🪪 Identity Profile</span>
-              <div><span className="text-slate-500">Tourist ID:</span> <strong className="text-slate-200 font-mono">{investigationMode.touristId}</strong></div>
-              <div><span className="text-slate-500">Complainant:</span> <strong className="text-slate-200">{investigationMode.touristName || 'Demo Tourist'}</strong></div>
-              <div><span className="text-slate-500">W3C Credential DID:</span> <span className="font-mono text-emerald-400 block text-[11px]">did:tourist:{investigationMode.touristId}</span></div>
+          {investigationData.loading ? (
+            <div className="py-8 flex items-center justify-center text-slate-400">
+              <RefreshCw className="w-5 h-5 animate-spin mr-2" /> Loading investigation data...
             </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+              {/* Identity & DID — real data */}
+              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
+                <span className="font-bold text-blue-400 block uppercase tracking-wider">🧪 Identity Profile</span>
+                <div><span className="text-slate-500">Tourist ID:</span> <strong className="text-slate-200 font-mono">{investigationMode.touristId}</strong></div>
+                <div><span className="text-slate-500">Name:</span> <strong className="text-slate-200">{investigationData.tourist?.name || investigationMode.touristName || 'Unknown'}</strong></div>
+                <div><span className="text-slate-500">W3C Credential DID:</span> <span className="font-mono text-emerald-400 block text-[11px]">{investigationData.tourist?.did || 'No DID issued'}</span></div>
+                <div><span className="text-slate-500">Identity Status:</span> <span className={`font-mono font-bold text-[11px] ${investigationData.tourist?.identityStatus === 'verified' ? 'text-emerald-400' : 'text-amber-400'}`}>{(investigationData.tourist?.identityStatus || 'unknown').toUpperCase()}</span></div>
+                <div><span className="text-slate-500">Nationality:</span> <span className="text-slate-200">{investigationData.tourist?.nationality || 'N/A'}</span></div>
+              </div>
 
-            {/* AI Visual Clothing Profile */}
-            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
-              <span className="font-bold text-purple-400 flex items-center gap-1 uppercase tracking-wider">
-                <Shirt className="w-4 h-4" /> AI Attire Description
-              </span>
-              <p className="text-slate-300 font-mono text-[11px] leading-relaxed">
-                Top: Black Water-resistant Jacket<br />
-                Bottom: Dark Blue Denim Jeans<br />
-                Items: Red Backpack, Silver Watch
-              </p>
-            </div>
+              {/* AI Visual Clothing Profile — real data */}
+              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
+                <span className="font-bold text-purple-400 flex items-center gap-1 uppercase tracking-wider">
+                  <Shirt className="w-4 h-4" /> AI Attire Description
+                </span>
+                {investigationData.tourist?.clothingProfile ? (
+                  <p className="text-slate-300 font-mono text-[11px] leading-relaxed whitespace-pre-line">
+                    {typeof investigationData.tourist.clothingProfile === 'object'
+                      ? Object.entries(investigationData.tourist.clothingProfile)
+                          .map(([k, v]) => `${k}: ${v}`)
+                          .join('\n')
+                      : String(investigationData.tourist.clothingProfile)}
+                  </p>
+                ) : (
+                  <p className="text-slate-500 italic text-[11px]">No attire record on file</p>
+                )}
+              </div>
 
-            {/* Sepolia Audit Log & E-FIR */}
-            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
-              <span className="font-bold text-emerald-400 flex items-center gap-1 uppercase tracking-wider">
-                <Lock className="w-4 h-4" /> Sepolia Blockchain Evidence
-              </span>
-              <div className="text-[11px] font-mono text-slate-400 space-y-1">
-                <div>Hash: <span className="text-slate-200">0x8f3a2b...4e91</span></div>
-                <div>Status: <span className="text-emerald-400 font-bold">VERIFIED ON-CHAIN ⛓️</span></div>
-                <div>E-FIR: <span className="text-blue-400 font-bold">DRAFT_PENDING_APPROVAL</span></div>
+              {/* Movement History — real data */}
+              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
+                <span className="font-bold text-emerald-400 flex items-center gap-1 uppercase tracking-wider">
+                  <MapPin className="w-4 h-4" /> Movement History
+                </span>
+                {investigationData.locations.length > 0 ? (
+                  <div className="text-[11px] font-mono text-slate-400 space-y-1 max-h-32 overflow-y-auto">
+                    {investigationData.locations.slice(0, 10).map((loc: any, i: number) => (
+                      <div key={i} className="flex justify-between">
+                        <span className="text-slate-200">
+                          {loc.coordinates?.lat?.toFixed(4) ?? loc.lat?.toFixed(4)}, {loc.coordinates?.lng?.toFixed(4) ?? loc.lng?.toFixed(4)}
+                        </span>
+                        <span className="text-slate-500">
+                          {loc.timestamp ? new Date(loc.timestamp).toLocaleTimeString() : ''}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-slate-500 italic text-[11px]">No location history available</p>
+                )}
+                {investigationData.locations.length > 0 && (
+                  <div className="text-[10px] text-slate-500 pt-1 border-t border-slate-800">
+                    Showing {Math.min(10, investigationData.locations.length)} of {investigationData.locations.length} pings
+                  </div>
+                )}
               </div>
             </div>
-          </div>
+          )}
         </div>
       )}
+
+      {/* E-FIR Officer Review Panel (#25) */}
+      <div className="glass-panel p-5 rounded-2xl border border-slate-800 bg-slate-900/80 space-y-4">
+        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+          <h3 className="font-bold text-slate-200 text-sm flex items-center gap-2">
+            <FileText className="w-4 h-4 text-amber-400" /> E-FIR Officer Verification Queue
+          </h3>
+          <button
+            onClick={fetchEfirs}
+            className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs text-slate-300 font-mono cursor-pointer"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${efirLoading ? 'animate-spin' : ''}`} /> Refresh
+          </button>
+        </div>
+
+        {efirs.length === 0 ? (
+          <div className="py-6 text-center text-slate-500 text-sm">
+            No E-FIR drafts pending review.
+          </div>
+        ) : (
+          <div className="space-y-3 max-h-80 overflow-y-auto">
+            {efirs.map((efir: any) => {
+              const isPending = efir.policeVerification === 'PENDING_OFFICER_APPROVAL';
+              const isVerified = efir.policeVerification === 'OFFICER_VERIFIED';
+              const isRejected = efir.policeVerification === 'REJECTED';
+              const incidentId = efir._incidentId || efir.incidentId;
+
+              return (
+                <div
+                  key={efir.efirId}
+                  className={`p-4 rounded-xl border text-xs ${
+                    isPending
+                      ? 'bg-amber-950/30 border-amber-500/30'
+                      : isVerified
+                      ? 'bg-emerald-950/30 border-emerald-500/30'
+                      : 'bg-red-950/30 border-red-500/30'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold font-mono text-slate-200">{efir.efirId}</span>
+                      <span className="text-slate-400">•</span>
+                      <span className="text-slate-400 font-mono">{incidentId}</span>
+                    </div>
+                    <span className={`px-2 py-0.5 rounded font-bold font-mono text-[11px] ${
+                      isPending ? 'bg-amber-500/20 text-amber-400' :
+                      isVerified ? 'bg-emerald-500/20 text-emerald-400' :
+                      'bg-red-500/20 text-red-400'
+                    }`}>
+                      {isPending ? '⏳ PENDING' : isVerified ? '✅ VERIFIED' : '❌ REJECTED'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-slate-400 mb-3">
+                    <div>Complainant: <strong className="text-slate-200">{efir.touristName}</strong></div>
+                    <div>Incident: <strong className="text-slate-200">{efir.incidentType}</strong></div>
+                    <div>Location: <span className="text-slate-300 font-mono">{efir.location?.lat?.toFixed(4)}, {efir.location?.lng?.toFixed(4)}</span></div>
+                    <div>Filed: <span className="text-slate-300">{efir.createdAt ? new Date(efir.createdAt).toLocaleString() : 'N/A'}</span></div>
+                  </div>
+
+                  {efir.verifiedBy && (
+                    <div className="text-[11px] text-slate-500 mb-2 font-mono">
+                      {isVerified ? 'Approved' : 'Rejected'} by: {efir.verifiedBy} at {efir.verifiedAt ? new Date(efir.verifiedAt).toLocaleString() : ''}
+                      {efir.remarks && <span className="block text-slate-400 mt-0.5">Remarks: {efir.remarks}</span>}
+                    </div>
+                  )}
+
+                  {isPending && (
+                    <div className="flex items-center gap-2 pt-2 border-t border-slate-800">
+                      <button
+                        onClick={() => handleEfirAction(incidentId, 'APPROVE')}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg transition cursor-pointer"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" /> APPROVE
+                      </button>
+                      <button
+                        onClick={() => handleEfirAction(incidentId, 'REJECT')}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white font-bold rounded-lg transition cursor-pointer"
+                      >
+                        <Ban className="w-3.5 h-3.5" /> REJECT
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
       {/* Modal Popup on Incident Selection */}
       {selectedIncident && !investigationMode && (
@@ -388,7 +668,7 @@ export default function AdminPage() {
               </div>
               <div>
                 <h3 className="font-bold text-lg text-slate-100">Publish Government Geofence</h3>
-                <p className="text-xs text-slate-400">Add active danger zone polygon to MongoDB & On-Chain</p>
+                <p className="text-xs text-slate-400">Add active danger zone polygon to Supabase & On-Chain</p>
               </div>
             </div>
 

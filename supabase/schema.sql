@@ -13,6 +13,7 @@ drop table if exists locations cascade;
 drop table if exists geofences cascade;
 drop table if exists responders cascade;
 drop table if exists tourists cascade;
+drop table if exists users cascade;
 
 -- ---------------------------------------------------------------- tourists
 create table tourists (
@@ -105,6 +106,27 @@ create table incidents (
 create index incidents_created_idx on incidents ("createdAt" desc);
 create index incidents_efir_idx on incidents (("efirDraft" is not null));
 
+-- ------------------------------------------------------------------ users
+create table users (
+  id              uuid primary key default gen_random_uuid(),
+  "userId"        text unique not null,
+  email           text unique not null,
+  "passwordHash"  text not null,
+  salt            text not null,
+  name            text not null,
+  role            text not null check (role in ('admin', 'authority', 'responder', 'tourist')),
+  "entityId"      text,
+  department      text,
+  badge           text,
+  phone           text,
+  active          boolean default true,
+  "createdAt"     timestamptz default now(),
+  "updatedAt"     timestamptz default now()
+);
+create index users_email_idx on users (email);
+create index users_role_idx on users (role);
+create index users_entity_idx on users ("entityId");
+
 -- ------------------------------------------------------------------- RLS
 -- Every query runs server-side in Next.js API routes using the service_role
 -- key, which bypasses RLS. RLS is still enabled so that if the publishable
@@ -114,6 +136,8 @@ alter table locations  enable row level security;
 alter table geofences  enable row level security;
 alter table responders enable row level security;
 alter table incidents  enable row level security;
+alter table users      enable row level security;
 
 -- Deliberately no permissive policies: anon/publishable access is denied by
 -- default. Add scoped policies here when real auth is introduced.
+

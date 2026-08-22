@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { issueCredential } from "@/lib/identity/credential";
 import { hashSubject } from "@/lib/kyc/hash";
 import { kycProvider } from "@/lib/kyc/sandboxProvider";
@@ -9,10 +9,14 @@ import {
   replaceGeofences,
   replaceResponders,
   upsertIncident,
+  upsertUser,
+  listUsers,
   isSupabaseConfigured,
 } from "@/lib/db";
+import { hashPassword } from "@/lib/auth/crypto";
+import { requireAuth } from "@/lib/auth/guards";
 
-export async function POST() {
+export async function POST(request?: NextRequest) {
   if (!isSupabaseConfigured) {
     return NextResponse.json(
       {
@@ -22,6 +26,15 @@ export async function POST() {
       },
       { status: 503 }
     );
+  }
+
+  // Allow unauthenticated seed ONLY if database has 0 users (initial bootstrap)
+  if (request) {
+    const existingUsers = await listUsers();
+    if (existingUsers.length > 0) {
+      const auth = requireAuth(request, ['admin']);
+      if (auth.errorResponse) return auth.errorResponse;
+    }
   }
 
   try {
@@ -166,19 +179,70 @@ export async function POST() {
       resolvedAt: null,
     });
 
+    // 6. Seed staff users for RBAC authentication
+    const adminPass = hashPassword("Admin@123");
+    const authPass = hashPassword("Officer@123");
+    const respPass = hashPassword("Unit17@123");
+
+    await Promise.all([
+      upsertUser({
+        userId: "USR-ADMIN-01",
+        email: "admin@prahari.gov.in",
+        passwordHash: adminPass.hash,
+        salt: adminPass.salt,
+        name: "Chief Admin Officer",
+        role: "admin",
+        department: "Ministry of Tourism & Home Affairs",
+        badge: "ADM-001",
+        phone: "+91 98000 00001",
+        active: true,
+      }),
+      upsertUser({
+        userId: "USR-AUTH-01",
+        email: "officer.sharma@police.gov.in",
+        passwordHash: authPass.hash,
+        salt: authPass.salt,
+        name: "Inspector Vikram Sharma",
+        role: "authority",
+        department: "District Police Control Room",
+        badge: "AUTH-109",
+        phone: "+91 98000 00109",
+        active: true,
+      }),
+      upsertUser({
+        userId: "USR-RESP-17",
+        email: "unit17@dispatch.gov.in",
+        passwordHash: respPass.hash,
+        salt: respPass.salt,
+        name: "Unit #17 Patrol Lead",
+        role: "responder",
+        entityId: "Unit #17",
+        department: "Emergency Quick Response Team",
+        badge: "QRT-017",
+        phone: "+91 98765 00017",
+        active: true,
+      }),
+    ]);
+
     return NextResponse.json({
       success: true,
       message:
-        "Database successfully seeded with initial Tourist, Location, Geofence, Incident, and Responder data.",
+        "Database successfully seeded with Tourist, Location, Geofence, Incident, Responders, and Staff Users.",
       touristId: "TOUR-7890",
       did: seedIdentity.did,
       credentialHash: seedIdentity.credentialHash,
+      staffAccounts: [
+        { email: "admin@prahari.gov.in", role: "admin", defaultPassword: "Admin@123" },
+        { email: "officer.sharma@police.gov.in", role: "authority", defaultPassword: "Officer@123" },
+        { email: "unit17@dispatch.gov.in", role: "responder", defaultPassword: "Unit17@123" },
+      ],
     });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 
-export async function GET() {
-  return POST();
+export async function GET(request: NextRequest) {
+  return POST(request);
 }
+

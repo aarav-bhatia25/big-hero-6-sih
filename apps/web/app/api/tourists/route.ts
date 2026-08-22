@@ -1,18 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getTourist, updateTourist } from "@/lib/db";
+import { requireAuth, canAccessTouristData } from "@/lib/auth/guards";
 
 export async function GET(request: NextRequest) {
+  const auth = requireAuth(request);
+  if (auth.errorResponse) return auth.errorResponse;
+
+  const { session } = auth;
   const { searchParams } = new URL(request.url);
-  const touristId = searchParams.get("touristId") || "TOUR-7890";
+  const requestedId = searchParams.get("touristId");
+
+  // Determine target tourist ID
+  const targetId = requestedId || (session.role === 'tourist' ? session.touristId : 'TOUR-7890') || 'TOUR-7890';
+
+  if (!canAccessTouristData(session, targetId)) {
+    return NextResponse.json(
+      { success: false, error: "Forbidden: You are not authorized to view this tourist record." },
+      { status: 403 }
+    );
+  }
 
   try {
-    let tourist: any = await getTourist(touristId);
+    let tourist: any = await getTourist(targetId);
 
     if (!tourist) {
       // Fallback mock object if database is initializing
       tourist = {
-        touristId: "TOUR-7890",
-        name: "Ralston",
+        touristId: targetId,
+        name: session.name || "Ralston",
         nationality: "Indian",
         identityStatus: "verified",
         emergencyContacts: [
@@ -40,9 +55,21 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
+  const auth = requireAuth(request);
+  if (auth.errorResponse) return auth.errorResponse;
+
+  const { session } = auth;
+
   try {
     const body = await request.json();
-    const { touristId = "TOUR-7890", trackingConsent, preferences } = body;
+    const { touristId = session.touristId || "TOUR-7890", trackingConsent, preferences } = body;
+
+    if (!canAccessTouristData(session, touristId)) {
+      return NextResponse.json(
+        { success: false, error: "Forbidden: You cannot modify other tourists' settings." },
+        { status: 403 }
+      );
+    }
 
     const updateFields: any = {};
     if (typeof trackingConsent === "boolean") updateFields.trackingConsent = trackingConsent;
@@ -54,3 +81,4 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
+

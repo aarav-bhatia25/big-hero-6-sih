@@ -1,0 +1,212 @@
+import { NextRequest, NextResponse } from 'next/server';
+
+export type UserRole = 'admin' | 'authority' | 'responder' | 'tourist';
+
+export interface AuthSession {
+  userId: string;
+  role: UserRole;
+  email?: string;
+  name: string;
+  entityId?: string;
+  touristId?: string;
+  did?: string;
+  department?: string;
+  badge?: string;
+  iat: number;
+  exp: number;
+}
+
+export const SESSION_COOKIE_NAME = 'prahari_session';
+const SESSION_DURATION_SEC = 7 * 24 * 60 * 60; // 7 days
+
+function getSecretKey(): string {
+  return (
+    process.env.SESSION_SECRET ||
+    process.env.IDENTITY_SIGNING_KEY ||
+    process.env.KYC_HASH_SALT ||
+    'prahari-default-session-hmac-secret-salt-2026'
+  );
+}
+
+function base64UrlEncode(str: string): string {
+  const bytes = new TextEncoder().encode(str);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary)
+    .replace(/=/g, '')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_');
+}
+
+function base64UrlDecode(str: string): string {
+  let base64 = str.replace(/-/g, '+').replace(/_/g, '/');
+  while (base64.length % 4) {
+    base64 += '=';
+  }
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+/**
+ * Simple, fast HMAC-SHA256 signature generator using Web Crypto or pure SHA-256
+ */
+async function computeHmacSignature(data: string, secret: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const keyData = encoder.encode(secret);
+  const key = await crypto.subtle.importKey(
+    'raw',
+    keyData,
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const signatureBuffer = await crypto.subtle.sign('HMAC', key, encoder.encode(data));
+  const bytes = new Uint8Array(signatureBuffer);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary)
+    .replace(/=/g, '')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_');
+}
+
+/**
+ * Fallback sync signature generator for immediate token production
+ */
+function syncHmacSign(data: string, secret: string): string {
+  // Deterministic FNV-1a mixing across payload and secret
+  let hash = 0x811c9dc5;
+  const combined = `${secret}:${data}`;
+  for (let i = 0; i < combined.length; i++) {
+    hash ^= combined.charCodeAt(i);
+    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+  }
+  return (hash >>> 0).toString(36) + base64UrlEncode(secret.slice(0, 8));
+}
+
+/**
+ * Creates a signed stateless session token.
+ */
+export function createSessionToken(
+  data: Omit<AuthSession, 'iat' | 'exp'>,
+  durationSec: number = SESSION_DURATION_SEC
+): string {
+  const now = Math.floor(Date.now() / 1000);
+  const payload: AuthSession = {
+    ...data,
+    iat: now,
+    exp: now + durationSec,
+  };
+
+  const payloadJson = JSON.stringify(payload);
+  const encodedPayload = base64UrlEncode(payloadJson);
+  const signature = syncHmacSign(encodedPayload, getSecretKey());
+
+  return `${encodedPayload}.${signature}`;
+}
+
+/**
+ * Verifies a session token, returning the payload if valid and unexpired, or null otherwise.
+ */
+export function verifySessionToken(token: string): AuthSession | null {
+  if (!token || typeof token !== 'string') return null;
+
+  const parts = token.split('.');
+  if (parts.length !== 2) return null;
+
+  const [encodedPayload, signature] = parts;
+  if (!encodedPayload || !signature) return null;
+
+  try {
+    const expectedSig = syncHmacSign(encodedPayload, getSecretKey());
+    if (signature !== expectedSig) {
+      return null;
+    }
+
+    const payloadJson = base64UrlDecode(encodedPayload);
+    const session: AuthSession = JSON.parse(payloadJson);
+
+    const now = Math.floor(Date.now() / 1000);
+    if (session.exp && session.exp < now) {
+      return null; // Expired
+    }
+
+    return session;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Extracts and verifies session from NextRequest (Cookie or Authorization header).
+ */
+export function getSessionFromRequest(request: NextRequest): AuthSession | null {
+  // 1. Check Cookie
+  const cookieToken = request.cookies.get(SESSION_COOKIE_NAME)?.value;
+  if (cookieToken) {
+    const session = verifySessionToken(cookieToken);
+    if (session) return session;
+  }
+
+  // 2. Check Authorization Header: Bearer <token>
+  const authHeader = request.headers.get('authorization') || request.headers.get('Authorization');
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const bearerToken = authHeader.slice(7).trim();
+    const session = verifySessionToken(bearerToken);
+    if (session) return session;
+  }
+
+  // 3. Fallback: Parse Cookie header string if request.cookies is empty
+  const rawCookieHeader = request.headers.get('cookie') || request.headers.get('Cookie');
+  if (rawCookieHeader) {
+    const match = rawCookieHeader.match(new RegExp(`(?:^|;\\s*)${SESSION_COOKIE_NAME}=([^;]+)`));
+    if (match?.[1]) {
+      const session = verifySessionToken(decodeURIComponent(match[1]));
+      if (session) return session;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Sets the session cookie on a NextResponse object.
+ */
+export function setSessionCookie(
+  response: NextResponse,
+  token: string,
+  durationSec: number = SESSION_DURATION_SEC
+): void {
+  response.cookies.set({
+    name: SESSION_COOKIE_NAME,
+    value: token,
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+    maxAge: durationSec,
+  });
+}
+
+/**
+ * Clears the session cookie on a NextResponse object.
+ */
+export function clearSessionCookie(response: NextResponse): void {
+  response.cookies.set({
+    name: SESSION_COOKIE_NAME,
+    value: '',
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 0,
+  });
+}

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { insertIncident, listIncidents, updateIncident, listResponders } from "@/lib/db";
 import { findNearestResponder } from "@/lib/services/dispatchEngine";
+import { emitToGateway } from "@/lib/services/gatewayEmit";
+import { requireAuth } from "@/lib/auth/guards";
 
 const MOCK_FALLBACK_INCIDENTS = [
   {
@@ -34,11 +36,16 @@ const MOCK_FALLBACK_INCIDENTS = [
 ];
 
 export async function POST(request: NextRequest) {
+  const auth = requireAuth(request, ['tourist', 'authority', 'admin', 'responder']);
+  if (auth.errorResponse) return auth.errorResponse;
+
+  const { session } = auth;
+
   try {
     const body = await request.json();
     const {
-      touristId = "DTI-IND-000123",
-      touristName = "Demo Tourist",
+      touristId = session.touristId || "DTI-IND-000123",
+      touristName = session.name || "Demo Tourist",
       type = "PANIC",
       location,
       lat = 19.0760,
@@ -91,6 +98,9 @@ export async function POST(request: NextRequest) {
 
     await insertIncident(incident as any);
 
+    // Notify the realtime gateway so the authority dashboard updates instantly
+    emitToGateway("incident:create", incident);
+
     return NextResponse.json({
       success: true,
       message: "Emergency SOS registered and dispatched to nearest responder team.",
@@ -102,11 +112,23 @@ export async function POST(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest) {
+  const auth = requireAuth(request);
+  if (auth.errorResponse) return auth.errorResponse;
+
+  const { session } = auth;
+
   try {
-    let incidents: any[] = await listIncidents(20);
+    let incidents: any[] = await listIncidents(50);
 
     if (incidents.length === 0) {
       incidents = MOCK_FALLBACK_INCIDENTS;
+    }
+
+    // If tourist, filter to only their incidents
+    if (session.role === 'tourist' && session.touristId) {
+      incidents = incidents.filter(
+        (i) => i.touristId === session.touristId || i.touristId === 'TOUR-7890' || i.touristId === session.userId
+      );
     }
 
     return NextResponse.json({ success: true, incidents });
@@ -116,10 +138,12 @@ export async function GET(request: NextRequest) {
 }
 
 /**
- * Dispatch / status update. Previously the dashboard only mutated local React
- * state, so a "dispatch" was lost on refresh — this persists it.
+ * Dispatch / status update. Requires responder, authority, or admin role.
  */
 export async function PATCH(request: NextRequest) {
+  const auth = requireAuth(request, ['responder', 'authority', 'admin']);
+  if (auth.errorResponse) return auth.errorResponse;
+
   try {
     const body = await request.json();
     const { incidentId, status, assignedResponderUnitId, assignedResponderName, etaMinutes } = body;
@@ -147,8 +171,11 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
+    emitToGateway("incident:update", updated);
+
     return NextResponse.json({ success: true, incident: updated });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
+
