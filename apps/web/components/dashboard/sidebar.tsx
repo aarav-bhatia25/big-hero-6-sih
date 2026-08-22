@@ -3,9 +3,9 @@ import { BellRing, ChevronLeft, CircleHelp, LayoutDashboard, Map, ShieldCheck, S
 import { cn } from "@/lib/utils";
 
 const links = [
-  { href: "/", label: "Command center", icon: LayoutDashboard },
-  { href: "/authority", label: "Authority Center", icon: Map },
-  { href: "/tourist", label: "Tourist Safety App", icon: Smartphone },
+  { href: "/citizen", label: "Citizen Safety View", icon: Smartphone },
+  { href: "/admin", label: "Admin Command View", icon: Map },
+  { href: "/", label: "District Dashboard", icon: LayoutDashboard },
   { href: "/onboarding", label: "Tourist identity", icon: Users },
 ];
 
