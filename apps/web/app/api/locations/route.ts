@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getLocationsCollection } from "@/lib/db";
+import { insertLocation, listLocations } from "@/lib/db";
 
 export async function POST(request: NextRequest) {
   try {
@@ -13,15 +13,12 @@ export async function POST(request: NextRequest) {
     const ping = {
       touristId,
       coordinates: { lat, lng },
-      timestamp: new Date(),
+      timestamp: new Date().toISOString(),
       accuracy,
       source,
     };
 
-    const col = await getLocationsCollection();
-    if (col) {
-      await col.insertOne(ping);
-    }
+    await insertLocation({ ...ping, lat, lng });
 
     return NextResponse.json({ success: true, ping });
   } catch (error: any) {
@@ -34,10 +31,7 @@ export async function GET(request: NextRequest) {
   const touristId = searchParams.get("touristId") || "TOUR-7890";
 
   try {
-    const col = await getLocationsCollection();
-    const history = col
-      ? await col.find({ touristId }).sort({ timestamp: -1 }).limit(50).toArray()
-      : [];
+    const history = await listLocations(touristId, 50);
 
     return NextResponse.json({ success: true, history });
   } catch (error: any) {

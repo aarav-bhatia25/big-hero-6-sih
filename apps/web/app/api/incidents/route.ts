@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getIncidentsCollection, getRespondersCollection } from "@/lib/db";
+import { insertIncident, listIncidents, updateIncident, listResponders } from "@/lib/db";
 import { findNearestResponder } from "@/lib/services/dispatchEngine";
 
 const MOCK_FALLBACK_INCIDENTS = [
@@ -52,12 +52,25 @@ export async function POST(request: NextRequest) {
     const incidentLng = location?.lng ?? lng;
     const incidentId = `INC-${Math.floor(1000 + Math.random() * 9000)}`;
 
-    const mockResponders = [
-      { id: '1', unitId: 'Unit #17', name: 'Police Patrol Unit 17', type: 'POLICE', phone: '+91 98765 00017', lat: 19.079, lng: 72.882 },
-      { id: '2', unitId: 'Unit #09', name: 'SAR Medical Team 9', type: 'MEDICAL', phone: '+91 98765 00009', lat: 19.083, lng: 72.880 },
-    ];
+    // Match against real responders from the database, falling back to a
+    // static pair only if none are registered yet.
+    const dbResponders = await listResponders();
+    const candidates = dbResponders.length
+      ? dbResponders.map((r: any) => ({
+          id: r.id ?? r.responderId,
+          unitId: r.unitId ?? r.responderId,
+          name: r.name ?? `${r.department} ${r.responderId}`,
+          type: r.type ?? r.department,
+          phone: r.phone ?? '',
+          lat: r.location?.lat,
+          lng: r.location?.lng,
+        })).filter((r: any) => typeof r.lat === 'number' && typeof r.lng === 'number')
+      : [
+          { id: '1', unitId: 'Unit #17', name: 'Police Patrol Unit 17', type: 'POLICE', phone: '+91 98765 00017', lat: 19.079, lng: 72.882 },
+          { id: '2', unitId: 'Unit #09', name: 'SAR Medical Team 9', type: 'MEDICAL', phone: '+91 98765 00009', lat: 19.083, lng: 72.880 },
+        ];
 
-    const match = findNearestResponder(incidentLat, incidentLng, mockResponders);
+    const match = findNearestResponder(incidentLat, incidentLng, candidates);
 
     const incident = {
       incidentId,
@@ -68,18 +81,15 @@ export async function POST(request: NextRequest) {
       location: { lat: incidentLat, lng: incidentLng, address },
       severity,
       riskScore: severity === 'CRITICAL' ? 95 : 75,
-      createdAt: new Date(),
-      assignedResponder: match?.responder?.id || "1",
-      assignedResponderUnitId: match?.responder?.unitId || "Unit #17",
-      assignedResponderName: match?.responder?.name || "Police Patrol Unit 17",
-      etaMinutes: match?.etaMinutes || 4,
+      createdAt: new Date().toISOString(),
+      assignedResponder: match?.responder?.id ?? null,
+      assignedResponderUnitId: match?.responder?.unitId ?? null,
+      assignedResponderName: match?.responder?.name ?? null,
+      etaMinutes: match?.etaMinutes ?? null,
       resolvedAt: null,
     };
 
-    const col = await getIncidentsCollection();
-    if (col) {
-      await col.insertOne(incident as any);
-    }
+    await insertIncident(incident as any);
 
     return NextResponse.json({
       success: true,
@@ -93,16 +103,51 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
-    const col = await getIncidentsCollection();
-    let incidents = col
-      ? await col.find({}).sort({ createdAt: -1 }).limit(20).toArray()
-      : [];
+    let incidents: any[] = await listIncidents(20);
 
     if (incidents.length === 0) {
       incidents = MOCK_FALLBACK_INCIDENTS;
     }
 
     return NextResponse.json({ success: true, incidents });
+  } catch (error: any) {
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  }
+}
+
+/**
+ * Dispatch / status update. Previously the dashboard only mutated local React
+ * state, so a "dispatch" was lost on refresh — this persists it.
+ */
+export async function PATCH(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { incidentId, status, assignedResponderUnitId, assignedResponderName, etaMinutes } = body;
+
+    if (!incidentId) {
+      return NextResponse.json({ success: false, error: "incidentId is required" }, { status: 400 });
+    }
+
+    const fields: Record<string, any> = {};
+    if (status) fields.status = status;
+    if (assignedResponderUnitId) fields.assignedResponderUnitId = assignedResponderUnitId;
+    if (assignedResponderName) fields.assignedResponderName = assignedResponderName;
+    if (typeof etaMinutes === "number") fields.etaMinutes = etaMinutes;
+    if (status === "resolved" || status === "RESOLVED") fields.resolvedAt = new Date().toISOString();
+
+    if (Object.keys(fields).length === 0) {
+      return NextResponse.json({ success: false, error: "No updatable fields supplied" }, { status: 400 });
+    }
+
+    const updated = await updateIncident(incidentId, fields);
+    if (!updated) {
+      return NextResponse.json(
+        { success: false, error: `Incident ${incidentId} not found or database unavailable` },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json({ success: true, incident: updated });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }

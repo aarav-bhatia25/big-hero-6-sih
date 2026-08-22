@@ -11,8 +11,8 @@ interface IncidentItem {
   type: string;
   severity: string;
   status: string;
-  riskScore: number;
-  location: { lat: number; lng: number };
+  riskScore?: number | null;
+  location?: { lat: number; lng: number } | null;
   assignedResponderUnitId?: string;
   etaMinutes?: number;
 }
@@ -59,7 +59,7 @@ export default function IncidentQueue({
               >
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
-                    {inc.severity === 'CRITICAL' ? (
+                    {String(inc.severity).toLowerCase() === 'critical' ? (
                       <ShieldAlert className="w-4 h-4 text-red-400 animate-pulse" />
                     ) : (
                       <AlertTriangle className="w-4 h-4 text-amber-400" />
@@ -70,7 +70,7 @@ export default function IncidentQueue({
                     </span>
                   </div>
                   <span className="text-xs font-mono font-bold text-red-400">
-                    Risk: {inc.riskScore}/100
+                    Risk: {inc.riskScore ?? '—'}/100
                   </span>
                 </div>
 
@@ -81,7 +81,7 @@ export default function IncidentQueue({
                   </div>
                   <div className="flex justify-between items-center text-slate-400 pt-1">
                     <span>Assigned: <strong className="text-blue-400">{inc.assignedResponderUnitId || 'Searching...'}</strong></span>
-                    <span>ETA: <strong className="text-emerald-400">~{inc.etaMinutes || 5} min</strong></span>
+                    <span>ETA: <strong className="text-emerald-400">{inc.etaMinutes != null ? `~${inc.etaMinutes} min` : '—'}</strong></span>
                   </div>
                 </div>
               </div>

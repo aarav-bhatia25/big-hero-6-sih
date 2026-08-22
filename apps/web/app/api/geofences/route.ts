@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
-import { getGeofencesCollection } from "@/lib/db";
+import { listActiveGeofences, insertGeofence } from "@/lib/db";
 
 export async function GET() {
   try {
-    const col = await getGeofencesCollection();
-    let geofences = col ? await col.find({ active: true }).toArray() : [];
+    let geofences: any[] = await listActiveGeofences();
 
     if (geofences.length === 0) {
       // Fallback mock geofences
@@ -65,7 +64,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: 'Name and coordinates or geometry required' }, { status: 400 });
     }
 
-    const col = await getGeofencesCollection();
     const newGeofence = {
       name,
       type: type || 'high_risk',
@@ -77,15 +75,11 @@ export async function POST(request: Request) {
         coordinates: [coordinates ? coordinates.map(([lat, lng]: [number, number]) => [lng, lat]) : []],
       },
       metadata: { description },
-      createdAt: new Date(),
+      createdAt: new Date().toISOString(),
     };
 
-    if (col) {
-      const res = await col.insertOne(newGeofence as any);
-      return NextResponse.json({ success: true, geofence: { ...newGeofence, _id: res.insertedId } });
-    }
-
-    return NextResponse.json({ success: true, geofence: newGeofence });
+    const saved = await insertGeofence(newGeofence as any);
+    return NextResponse.json({ success: true, geofence: saved ?? newGeofence });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message || 'Error creating geofence' }, { status: 500 });
   }

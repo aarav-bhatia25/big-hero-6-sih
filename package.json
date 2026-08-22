@@ -2,7 +2,10 @@
   "name": "prahari",
   "private": true,
   "version": "0.1.0",
-  "workspaces": ["apps/*", "packages/*"],
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "dev": "concurrently \"pnpm --filter @prahari/web dev\" \"pnpm --filter @prahari/realtime dev\"",
     "dev:web": "pnpm --filter @prahari/web dev",
@@ -11,8 +14,11 @@
     "lint": "pnpm --filter @prahari/web lint",
     "contract:compile": "pnpm --filter @prahari/contracts compile",
     "contract:deploy:sepolia": "pnpm --filter @prahari/contracts deploy:sepolia",
-    "ml:dev": "cd services/ml && python -m uvicorn app.main:app --reload"
+    "ml:dev": "cd services/ml && python -m uvicorn app.main:app --reload",
+    "identity:keygen": "node scripts/generate-identity-key.mjs"
   },
-  "devDependencies": { "concurrently": "^9.1.2" },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
   "packageManager": "pnpm@11.19.0"
 }

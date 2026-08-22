@@ -9,14 +9,6 @@ export interface DigitalIdPayload {
   issueDate: string;
 }
 
-export const MOCK_DEMO_TOURIST: DigitalIdPayload = {
-  touristId: "DTI-IND-000123",
-  name: "Demo Tourist",
-  nationality: "India",
-  verified: true,
-  did: "did:tourist:DTI-IND-000123",
-  issueDate: "2026-08-22",
-};
 
 export async function generateDigitalIdQr(didString: string): Promise<string> {
   try {

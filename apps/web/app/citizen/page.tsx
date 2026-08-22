@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import {
   ShieldCheck,
@@ -53,6 +53,16 @@ export default function CitizenPage() {
   // Geofence & Risk State
   const [geofences, setGeofences] = useState<any[]>([]);
 
+  // The credentialed tourist this session belongs to. Loaded from the API so
+  // the citizen and authority views always agree on who is being tracked.
+  const [tourist, setTourist] = useState<any | null>(null);
+  const touristId: string | null = tourist?.touristId ?? null;
+
+  // The geolocation watcher is registered once, so it would capture a stale
+  // touristId. A ref keeps the id current inside that long-lived closure.
+  const touristIdRef = useRef<string | null>(null);
+  useEffect(() => { touristIdRef.current = touristId; }, [touristId]);
+
   // Fetch geofences and set up location tracking
   useEffect(() => {
     const hour = new Date().getHours();
@@ -67,6 +77,13 @@ export default function CitizenPage() {
       })
       .catch(console.error);
 
+    fetch('/api/tourists')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.tourist) setTourist(data.tourist);
+      })
+      .catch(console.error);
+
     if (navigator.geolocation && locationConsent) {
       const watchId = navigator.geolocation.watchPosition(
         (pos) => {
@@ -74,12 +91,14 @@ export default function CitizenPage() {
           const lng = pos.coords.longitude;
           setCoords({ lat, lng });
 
-          // Send continuous telemetry to MongoDB
-          fetch('/api/locations', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ touristId: 'DTI-IND-000123', lat, lng, source: 'gps' }),
-          }).catch(() => {});
+          // Send telemetry for the tourist this session actually belongs to.
+          if (touristIdRef.current) {
+            fetch('/api/locations', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ touristId: touristIdRef.current, lat, lng, source: 'gps' }),
+            }).catch(() => {});
+          }
         },
         () => {},
         { enableHighAccuracy: true }
@@ -90,7 +109,7 @@ export default function CitizenPage() {
 
   // Check geofence status
   const formattedGeofences = geofences.map((g) => ({
-    id: g._id || g.name,
+    id: g.id || g.name,
     name: g.name,
     type: 'HIGH_RISK' as const,
     severity: (g.severity?.toUpperCase() || 'HIGH') as any,
@@ -117,7 +136,7 @@ export default function CitizenPage() {
       await fetch('/api/attire', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ touristId: 'DTI-IND-000123', ...attireForm }),
+        body: JSON.stringify({ touristId, ...attireForm }),
       });
       setAttireSaved(true);
       setTimeout(() => {
@@ -138,7 +157,7 @@ export default function CitizenPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           incidentId: activeIncident?.incidentId,
-          touristId: 'DTI-IND-000123',
+          touristId,
           touristName: 'Demo Tourist',
           passportAadhaar: 'IND-P892100',
           incidentType: activeIncident ? activeIncident.type : 'Emergency SOS Panic Alert',
@@ -226,7 +245,9 @@ export default function CitizenPage() {
               </div>
               <h2 className="font-serif font-bold text-2xl text-[#14213D]">{greeting}, Demo Tourist</h2>
               <p className="text-xs text-slate-600 leading-relaxed">
-                Your Digital Tourist Identity Permit (`did:tourist:DTI-IND-000123`) is registered with district emergency services. Spatial geofence boundaries and automated risk scoring are active.
+                {tourist?.did
+                  ? <>Your Digital Tourist Identity Permit (<span className="font-mono">{tourist.did}</span>) is registered with district emergency services. Spatial geofence boundaries and automated risk scoring are active.</>
+                  : <>No Digital Tourist ID has been issued for this session yet. Complete verification to activate emergency services registration.</>}
               </p>
             </div>
 
@@ -277,7 +298,7 @@ export default function CitizenPage() {
         />
 
         {/* 5. Official Digital Tourist ID Pass Component */}
-        <DigitalIdCard />
+        <DigitalIdCard tourist={tourist} />
 
         {/* 6. Form Action Grid */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

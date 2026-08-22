@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getIncidentsCollection, getTouristsCollection } from '@/lib/db';
+import { listIncidentsWithEfir, upsertIncident, listIncidents } from '@/lib/db';
 
 export async function POST(request: NextRequest) {
   try {
@@ -28,17 +28,25 @@ export async function POST(request: NextRequest) {
       emergencyContact,
       status: 'DRAFT_GENERATED',
       policeVerification: 'PENDING_OFFICER_APPROVAL',
-      createdAt: new Date(),
+      createdAt: new Date().toISOString(),
     };
 
-    const col = await getIncidentsCollection();
-    if (col) {
-      await col.updateOne(
-        { incidentId: draftEfIR.incidentId },
-        { $set: { efirDraft: draftEfIR } },
-        { upsert: true }
-      );
-    }
+    // Attach the draft to the incident, creating a stub incident if absent.
+    const existing = (await listIncidents(100)).find(
+      (i: any) => i.incidentId === draftEfIR.incidentId
+    );
+    await upsertIncident({
+      ...(existing ?? {
+        incidentId: draftEfIR.incidentId,
+        touristId,
+        touristName,
+        type: 'SOS',
+        status: 'new',
+        location,
+        severity: 'critical',
+      }),
+      efirDraft: draftEfIR,
+    });
 
     return NextResponse.json({
       success: true,
@@ -52,10 +60,7 @@ export async function POST(request: NextRequest) {
 
 export async function GET() {
   try {
-    const col = await getIncidentsCollection();
-    const incidentsWithEfir = col
-      ? await col.find({ efirDraft: { $exists: true } }).toArray()
-      : [];
+    const incidentsWithEfir = await listIncidentsWithEfir();
 
     return NextResponse.json({ success: true, efirs: incidentsWithEfir.map((i) => i.efirDraft) });
   } catch (err: any) {

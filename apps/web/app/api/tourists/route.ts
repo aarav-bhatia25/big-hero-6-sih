@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getTouristsCollection } from "@/lib/db";
+import { getTourist, updateTourist } from "@/lib/db";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const touristId = searchParams.get("touristId") || "TOUR-7890";
 
   try {
-    const col = await getTouristsCollection();
-    let tourist = col ? await col.findOne({ touristId }) : null;
+    let tourist: any = await getTourist(touristId);
 
     if (!tourist) {
       // Fallback mock object if database is initializing
@@ -45,14 +44,10 @@ export async function PATCH(request: NextRequest) {
     const body = await request.json();
     const { touristId = "TOUR-7890", trackingConsent, preferences } = body;
 
-    const col = await getTouristsCollection();
-    if (col) {
-      const updateFields: any = {};
-      if (typeof trackingConsent === "boolean") updateFields.trackingConsent = trackingConsent;
-      if (preferences) updateFields.preferences = preferences;
-
-      await col.updateOne({ touristId }, { $set: updateFields });
-    }
+    const updateFields: any = {};
+    if (typeof trackingConsent === "boolean") updateFields.trackingConsent = trackingConsent;
+    if (preferences) updateFields.preferences = preferences;
+    if (Object.keys(updateFields).length) await updateTourist(touristId, updateFields);
 
     return NextResponse.json({ success: true, message: "Tourist preferences updated" });
   } catch (error: any) {

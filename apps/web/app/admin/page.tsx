@@ -29,6 +29,12 @@ import IncidentDetailModal from '@/components/authority/IncidentDetailModal';
 export default function AdminPage() {
   const [incidents, setIncidents] = useState<any[]>([]);
   const [geofences, setGeofences] = useState<any[]>([]);
+  const [responders, setResponders] = useState<any[]>([]);
+  const [stats, setStats] = useState<{
+    activeTourists: number; liveIncidents: number;
+    highRiskZones: number; respondersAvailable: number; respondersTotal: number;
+  } | null>(null);
+  const [touristPos, setTouristPos] = useState<{ lat: number; lng: number } | null>(null);
   const [selectedIncident, setSelectedIncident] = useState<any | null>(null);
   const [investigationMode, setInvestigationMode] = useState<any | null>(null);
   const [showGeofenceModal, setShowGeofenceModal] = useState(false);
@@ -45,19 +51,48 @@ export default function AdminPage() {
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
-      const [incRes, geoRes] = await Promise.all([
+      const [incRes, geoRes, statRes, respRes, locRes] = await Promise.all([
         fetch('/api/incidents'),
         fetch('/api/geofences'),
+        fetch('/api/stats'),
+        fetch('/api/responders'),
+        fetch('/api/locations?touristId=TOUR-7890'),
       ]);
 
       const incData = await incRes.json();
       const geoData = await geoRes.json();
+      const statData = await statRes.json();
+      const respData = await respRes.json();
+      const locData = await locRes.json();
+
+      if (statData.stats) setStats(statData.stats);
+
+      if (respData.responders) {
+        setResponders(
+          respData.responders
+            .map((r: any) => ({
+              id: r.id ?? r.responderId,
+              unitId: r.unitId ?? r.responderId,
+              name: r.name ?? `${r.department ?? 'Unit'} ${r.responderId ?? ''}`.trim(),
+              lat: r.location?.lat,
+              lng: r.location?.lng,
+              type: r.type ?? r.department ?? 'POLICE',
+            }))
+            .filter((r: any) => typeof r.lat === 'number' && typeof r.lng === 'number')
+        );
+      }
+
+      // Latest known position of the tracked tourist (drives the map marker).
+      const latest = locData?.history?.[0];
+      if (latest?.coordinates?.lat != null) {
+        setTouristPos({ lat: latest.coordinates.lat, lng: latest.coordinates.lng });
+      }
 
       if (incData.incidents) setIncidents(incData.incidents);
       if (geoData.geofences) {
         setGeofences(
           geoData.geofences.map((g: any) => ({
-            id: g._id || g.name,
+            id: g.id || g.name,
             name: g.name,
             coordinates: g.coordinates || g.geometry?.coordinates?.[0]?.map(([lng, lat]: [number, number]) => [lat, lng]) || [],
             severity: g.severity || 'high',
@@ -75,16 +110,42 @@ export default function AdminPage() {
     fetchDashboardData();
   }, []);
 
-  const handleDispatchAction = (incidentId: string) => {
-    setIncidents((prev) =>
-      prev.map((inc) =>
-        inc.incidentId === incidentId
-          ? { ...inc, status: 'DISPATCHED', assignedResponderUnitId: 'Unit #17 (En Route)' }
-          : inc
-      )
-    );
-    setSelectedIncident(null);
-    alert(`🚨 EMERGENCY DISPATCH DISPATCHED for Incident ${incidentId}! Patrol Unit #17 notified.`);
+  const handleDispatchAction = async (incidentId: string) => {
+    // Pick the nearest available responder we actually have on record.
+    const inc = incidents.find((i) => i.incidentId === incidentId);
+    const unit =
+      responders.find((r) => r.unitId === inc?.assignedResponderUnitId) ?? responders[0] ?? null;
+
+    try {
+      const res = await fetch('/api/incidents', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          incidentId,
+          status: 'DISPATCHED',
+          ...(unit ? { assignedResponderUnitId: unit.unitId, assignedResponderName: unit.name } : {}),
+        }),
+      });
+      const data = await res.json();
+
+      if (!data.success) {
+        alert(`Dispatch failed: ${data.error ?? 'unknown error'}`);
+        return;
+      }
+
+      // Reflect the persisted row rather than guessing.
+      setIncidents((prev) =>
+        prev.map((i) => (i.incidentId === incidentId ? { ...i, ...data.incident } : i))
+      );
+      setSelectedIncident(null);
+      alert(
+        `🚨 Dispatch confirmed for ${incidentId}` +
+          (unit ? ` — ${unit.unitId} (${unit.name}) notified.` : '. No responder unit on record.')
+      );
+    } catch (err) {
+      console.error('Dispatch failed:', err);
+      alert('Dispatch failed — could not reach the server.');
+    }
   };
 
   const handleCreateGeofence = async (e: React.FormEvent) => {
@@ -164,7 +225,7 @@ export default function AdminPage() {
           </div>
           <div>
             <span className="text-xs text-slate-400 uppercase font-semibold block">Active Tourists</span>
-            <span className="text-2xl font-black font-mono text-slate-100">124</span>
+            <span className="text-2xl font-black font-mono text-slate-100">{stats ? stats.activeTourists : '—'}</span>
           </div>
         </div>
 
@@ -174,7 +235,7 @@ export default function AdminPage() {
           </div>
           <div>
             <span className="text-xs text-slate-400 uppercase font-semibold block">Live Incidents</span>
-            <span className="text-2xl font-black font-mono text-red-400">{incidents.length}</span>
+            <span className="text-2xl font-black font-mono text-red-400">{stats ? stats.liveIncidents : incidents.length}</span>
           </div>
         </div>
 
@@ -183,8 +244,8 @@ export default function AdminPage() {
             <AlertTriangle className="w-6 h-6" />
           </div>
           <div>
-            <span className="text-xs text-slate-400 uppercase font-semibold block">High Risk Count</span>
-            <span className="text-2xl font-black font-mono text-amber-400">12</span>
+            <span className="text-xs text-slate-400 uppercase font-semibold block">High Risk Zones</span>
+            <span className="text-2xl font-black font-mono text-amber-400">{stats ? stats.highRiskZones : '—'}</span>
           </div>
         </div>
 
@@ -194,7 +255,9 @@ export default function AdminPage() {
           </div>
           <div>
             <span className="text-xs text-slate-400 uppercase font-semibold block">Responders</span>
-            <span className="text-2xl font-black font-mono text-blue-400">4 AVAILABLE</span>
+            <span className="text-2xl font-black font-mono text-blue-400">
+              {stats ? `${stats.respondersAvailable}/${stats.respondersTotal} AVAILABLE` : '—'}
+            </span>
           </div>
         </div>
       </div>
@@ -213,21 +276,17 @@ export default function AdminPage() {
           </div>
 
           <MapView
-            touristPos={{ lat: 19.076, lng: 72.8777 }}
+            touristPos={touristPos}
             geofences={geofences}
-            incidents={incidents.map((inc) => ({
-              id: inc._id || inc.incidentId,
+            incidents={incidents.filter((inc) => inc.location?.lat != null).map((inc) => ({
+              id: inc.id || inc.incidentId,
               incidentId: inc.incidentId,
               type: inc.type,
-              lat: inc.location?.lat || 19.076,
-              lng: inc.location?.lng || 72.8777,
+              lat: inc.location?.lat,
+              lng: inc.location?.lng,
               severity: inc.severity,
             }))}
-            responders={[
-              { id: '1', unitId: 'Unit #17', name: 'Police Patrol Unit 17', lat: 19.079, lng: 72.882, type: 'POLICE' },
-              { id: '2', unitId: 'Unit #09', name: 'SAR Medical Team 9', lat: 19.083, lng: 72.880, type: 'MEDICAL' },
-              { id: '3', unitId: 'Unit #04', name: 'Rapid Response Unit 4', lat: 19.071, lng: 72.873, type: 'RESCUE' },
-            ]}
+            responders={responders}
           />
         </div>
 

@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Polygon } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polygon, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
@@ -53,14 +53,53 @@ interface ClientMapInnerProps {
   }>;
 }
 
+/**
+ * Fits the viewport to whatever is actually on the map. Without this the map
+ * sat on a hardcoded Mumbai centre while the data was in Jaipur, so every
+ * real marker rendered off-screen.
+ */
+function FitToData({ points }: { points: Array<[number, number]> }) {
+  const map = useMap();
+  const key = JSON.stringify(points);
+
+  React.useEffect(() => {
+    if (points.length === 0) return;
+    if (points.length === 1) {
+      map.setView(points[0], 14);
+      return;
+    }
+    map.fitBounds(L.latLngBounds(points), { padding: [40, 40], maxZoom: 15 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, map]);
+
+  return null;
+}
+
+// Jaipur — matches the seeded dataset; only used when there is nothing to show.
+const FALLBACK_CENTER: [number, number] = [26.9124, 75.7873];
+
 export default function ClientMapInner({
-  touristPos = { lat: 19.076, lng: 72.8777 },
+  touristPos = null,
   geofences = [],
   incidents = [],
   responders = [],
 }: ClientMapInnerProps) {
-  const centerLat = touristPos?.lat || 19.076;
-  const centerLng = touristPos?.lng || 72.8777;
+  const points: Array<[number, number]> = [
+    ...(touristPos ? [[touristPos.lat, touristPos.lng] as [number, number]] : []),
+    ...incidents
+      .filter((i) => typeof i.lat === 'number' && typeof i.lng === 'number')
+      .map((i) => [i.lat, i.lng] as [number, number]),
+    ...responders
+      .filter((r) => typeof r.lat === 'number' && typeof r.lng === 'number')
+      .map((r) => [r.lat, r.lng] as [number, number]),
+    ...geofences.flatMap((g) =>
+      (g.coordinates ?? []).filter(
+        (c: any) => Array.isArray(c) && typeof c[0] === 'number' && typeof c[1] === 'number'
+      ) as Array<[number, number]>
+    ),
+  ];
+
+  const [centerLat, centerLng] = points[0] ?? FALLBACK_CENTER;
 
   return (
     <div className="w-full h-[450px] rounded-2xl overflow-hidden border border-slate-800 shadow-2xl relative text-slate-900">
@@ -70,6 +109,8 @@ export default function ClientMapInner({
         scrollWheelZoom={true}
         style={{ width: '100%', height: '100%' }}
       >
+        <FitToData points={points} />
+
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -90,13 +131,13 @@ export default function ClientMapInner({
         )}
 
         {/* Geofence Polygons */}
-        {geofences.map((gf) => (
+        {geofences.filter((gf) => (gf.coordinates?.length ?? 0) >= 3).map((gf) => (
           <Polygon
             key={gf.id}
             positions={gf.coordinates as [number, number][]}
             pathOptions={{
-              color: gf.severity === 'CRITICAL' ? '#ef4444' : '#f97316',
-              fillColor: gf.severity === 'CRITICAL' ? '#ef4444' : '#f97316',
+              color: String(gf.severity).toLowerCase() === 'critical' ? '#ef4444' : '#f97316',
+              fillColor: String(gf.severity).toLowerCase() === 'critical' ? '#ef4444' : '#f97316',
               fillOpacity: 0.25,
               weight: 2,
               dashArray: '4, 4',
@@ -104,7 +145,9 @@ export default function ClientMapInner({
           >
             <Popup>
               <div className="text-slate-900 p-1 font-sans">
-                <strong className="block text-sm text-red-600 font-bold">🔴 HIGH RISK ZONE</strong>
+                <strong className="block text-sm text-red-600 font-bold">
+                  {String(gf.severity).toUpperCase()} RISK ZONE
+                </strong>
                 <span className="text-xs font-semibold">{gf.name}</span>
               </div>
             </Popup>

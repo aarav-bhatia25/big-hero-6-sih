@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getTouristsCollection } from '@/lib/db';
+import { getTourist, updateTourist, upsertTourist } from '@/lib/db';
 
 export async function POST(request: NextRequest) {
   try {
@@ -21,16 +21,15 @@ export async function POST(request: NextRequest) {
       accessories,
       additionalNotes,
       structuredDescription: `Top: ${top} | Bottom: ${bottom} | Footwear: ${footwear} | Items: ${accessories}`,
-      updatedAt: new Date(),
+      updatedAt: new Date().toISOString(),
     };
 
-    const col = await getTouristsCollection();
-    if (col) {
-      await col.updateOne(
-        { touristId },
-        { $set: { clothingProfile } },
-        { upsert: true }
-      );
+    // upsert: update if the tourist exists, otherwise create a minimal record
+    const existing = await getTourist(touristId);
+    if (existing) {
+      await updateTourist(touristId, { clothingProfile });
+    } else {
+      await upsertTourist({ touristId, name: touristId, clothingProfile });
     }
 
     return NextResponse.json({
