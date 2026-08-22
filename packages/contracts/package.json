@@ -1,0 +1,7 @@
+{
+  "name": "@prahari/contracts",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": { "compile": "hardhat compile", "deploy:sepolia": "hardhat run scripts/deploy.ts --network sepolia" },
+  "devDependencies": { "@nomicfoundation/hardhat-toolbox": "^5.0.0", "@openzeppelin/contracts": "^5.2.0", "dotenv": "^16.4.7", "hardhat": "^2.22.18", "ts-node": "^10.9.2", "typescript": "^5.7.2" }
+}

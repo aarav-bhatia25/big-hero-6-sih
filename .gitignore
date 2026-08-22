@@ -1,0 +1,14 @@
+node_modules
+.pnpm-store
+.next
+dist
+coverage
+.env
+.env.local
+*.log
+__pycache__
+.venv
+artifacts
+cache
+typechain-types
+tmp

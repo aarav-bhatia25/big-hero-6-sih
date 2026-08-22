@@ -1,0 +1,6 @@
+import { ArrowUpRight } from "lucide-react";
+import { Card } from "@/components/ui/card";
+import { RiskBadge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { incidents } from "@/lib/mock-data";
+export function IncidentList() { return <Card className="overflow-hidden"><div className="flex items-center justify-between p-5"><div><h2 className="font-bold">Priority incidents</h2><p className="text-sm text-slate-500">Latest safety signals needing attention</p></div><Button variant="outline" size="sm">View all <ArrowUpRight size={14}/></Button></div><div className="divide-y">{incidents.map((incident) => <div key={incident.id} className="flex items-center gap-3 px-5 py-4"><div className="grid size-10 shrink-0 place-items-center rounded-full bg-slate-100 text-sm font-bold text-slate-600">{incident.tourist.split(" ").map((part) => part[0]).join("")}</div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><p className="font-semibold">{incident.type}</p><RiskBadge level={incident.risk}/></div><p className="truncate text-sm text-slate-500">{incident.tourist} · {incident.location}</p></div><div className="text-right"><p className="text-xs font-semibold text-slate-700">{incident.score}/100</p><p className="text-xs text-slate-400">{incident.reportedAt}</p></div></div>)}</div></Card>; }

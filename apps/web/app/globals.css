@@ -1,0 +1,8 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { --background: 210 25% 98%; --foreground: 222 47% 15%; }
+* { border-color: #e5eaf0; }
+body { min-height: 100vh; background: #f6f8fa; color: #14213d; }
+.maplibregl-ctrl-attrib { font-size: 10px; }
