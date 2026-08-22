@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { AlertOctagon, CheckCircle2, ShieldAlert, Loader2 } from 'lucide-react';
+import { Siren, CheckCircle2, Loader2, AlertTriangle } from 'lucide-react';
 
 interface SosButtonProps {
   touristPos?: { lat: number; lng: number };
@@ -46,60 +46,71 @@ export default function SosButton({
   };
 
   return (
-    <div className="glass-panel rounded-2xl p-6 border border-red-500/40 bg-slate-900/90 shadow-2xl flex flex-col items-center text-center relative overflow-hidden text-slate-100">
-      {/* Background ambient red glow */}
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-48 bg-red-600/10 rounded-full blur-3xl pointer-events-none" />
+    <div className="bg-white rounded-md p-6 border border-[#D8D2C4] text-[#14213D] font-sans">
+      <div className="flex items-center justify-between border-b border-[#D8D2C4] pb-3 mb-4">
+        <div>
+          <span className="text-[10px] font-mono uppercase tracking-wider text-slate-500 font-bold block">FORM NO. SOS-112</span>
+          <h2 className="text-lg font-serif font-bold text-[#14213D] flex items-center gap-2">
+            Emergency Response & Police Dispatch Panic Actuator
+          </h2>
+        </div>
+        <span className="text-xs font-mono text-[#FF7722] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-[#FF7722]/30 bg-amber-50">
+          ● DIRECT DISPATCH NODE
+        </span>
+      </div>
 
-      <h2 className="text-xl font-extrabold text-slate-100 flex items-center gap-2 mb-1">
-        <ShieldAlert className="w-6 h-6 text-red-500" /> Emergency Panic Dispatch
-      </h2>
-      <p className="text-xs text-slate-400 max-w-sm mb-6">
-        Pressing SOS instantly dispatches emergency units, alerts authorities, and broadcasts live GPS to your emergency contacts.
+      <p className="text-xs text-slate-600 max-w-xl mb-5 leading-relaxed">
+        Actuating emergency response pings the nearest police control room, broadcasts live GPS telemetry to district dispatchers, and initiates automated E-FIR draft compilation under Section 154 CrPC.
       </p>
 
       {activeSos ? (
-        <div className="w-full bg-red-950/80 border border-red-500 p-5 rounded-2xl animate-pulse text-left text-slate-200">
-          <div className="flex items-center justify-between border-b border-red-800/80 pb-3 mb-3">
+        <div className="w-full bg-amber-50 border-2 border-[#FF7722] p-4 rounded text-[#14213D]">
+          <div className="flex items-center justify-between border-b border-[#FF7722]/30 pb-2 mb-3">
             <div className="flex items-center gap-2">
-              <CheckCircle2 className="w-5 h-5 text-red-400" />
-              <span className="font-bold text-red-300">EMERGENCY SOS ACTIVE</span>
+              <CheckCircle2 className="w-5 h-5 text-[#FF7722]" />
+              <span className="font-serif font-bold text-[#14213D] text-sm">EMERGENCY DISPATCH ACTIVE</span>
             </div>
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-red-500 text-white">
-              {activeSos.incidentId}
+            <span className="px-2.5 py-0.5 rounded text-xs font-mono font-bold bg-[#14213D] text-white">
+              TICKET REF: {activeSos.incidentId}
             </span>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 text-xs">
-            <div>
-              <span className="text-slate-400 block font-medium">Assigned Unit</span>
-              <span className="font-bold text-slate-100">{activeSos.assignedResponderUnitId || 'Unit #17'}</span>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+            <div className="bg-white p-2.5 rounded border border-[#D8D2C4]">
+              <span className="text-[10px] font-mono text-slate-500 uppercase block font-bold">ASSIGNED PATROL UNIT</span>
+              <span className="font-bold text-[#14213D]">{activeSos.assignedResponderUnitId || 'District Police Unit #17'}</span>
             </div>
-            <div>
-              <span className="text-slate-400 block font-medium">Estimated Arrival</span>
-              <span className="font-bold text-emerald-400">~{activeSos.etaMinutes || 4} mins</span>
+            <div className="bg-white p-2.5 rounded border border-[#D8D2C4]">
+              <span className="text-[10px] font-mono text-slate-500 uppercase block font-bold">ESTIMATED DISPATCH ETA</span>
+              <span className="font-bold text-[#1B5E3C]">~{activeSos.etaMinutes || 4} MINS</span>
             </div>
-            <div className="col-span-2">
-              <span className="text-slate-400 block font-medium">GPS Dispatch Coordinates</span>
-              <span className="font-mono text-slate-300">{activeSos.location.lat.toFixed(4)}, {activeSos.location.lng.toFixed(4)}</span>
+            <div className="bg-white p-2.5 rounded border border-[#D8D2C4]">
+              <span className="text-[10px] font-mono text-slate-500 uppercase block font-bold">GPS TELEMETRY POINT</span>
+              <span className="font-mono text-[#14213D]">{activeSos.location.lat.toFixed(4)}, {activeSos.location.lng.toFixed(4)}</span>
             </div>
           </div>
         </div>
       ) : (
-        <button
-          onClick={handleSosClick}
-          disabled={loading}
-          className="w-44 h-44 rounded-full bg-gradient-to-tr from-red-700 via-red-600 to-rose-500 hover:from-red-600 hover:to-rose-400 active:scale-95 text-white font-extrabold text-2xl shadow-[0_0_50px_rgba(225,29,72,0.6)] flex flex-col items-center justify-center gap-2 border-4 border-red-400/50 transition duration-200 relative group cursor-pointer"
-        >
-          {loading ? (
-            <Loader2 className="w-10 h-10 animate-spin" />
-          ) : (
-            <>
-              <AlertOctagon className="w-12 h-12 group-hover:scale-110 transition" />
-              <span>🚨 SOS</span>
-              <span className="text-[10px] tracking-widest font-mono uppercase text-red-200">Tap to Dispatch</span>
-            </>
-          )}
-        </button>
+        <div className="flex flex-col items-center justify-center py-2">
+          {/* Signature SOS Element: Solid rectangular button, deep saffron fill (#FF7722), bold sans label, thin inset border */}
+          <button
+            onClick={handleSosClick}
+            disabled={loading}
+            className="w-full max-w-md py-4 px-6 bg-[#FF7722] hover:bg-[#E66412] active:bg-[#CC5205] text-white font-sans font-bold text-base tracking-wider uppercase rounded border-2 border-amber-600 border-t-amber-400 border-b-amber-800 shadow-md flex items-center justify-center gap-3 transition cursor-pointer"
+          >
+            {loading ? (
+              <Loader2 className="w-5 h-5 animate-spin" />
+            ) : (
+              <>
+                <Siren className="w-6 h-6 text-white" />
+                <span>DISPATCH EMERGENCY RESPONSE</span>
+              </>
+            )}
+          </button>
+          <span className="text-[11px] font-mono text-slate-500 mt-2.5">
+            PRESS TO IMMEDIATE DISPATCH POLICE & MEDICAL UNITS TO CURRENT GPS COORDINATES
+          </span>
+        </div>
       )}
     </div>
   );
