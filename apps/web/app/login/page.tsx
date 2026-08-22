@@ -4,21 +4,16 @@ import React, { useState, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
-  ShieldAlert,
   ShieldCheck,
   Building2,
   Lock,
   Mail,
   KeyRound,
-  ArrowRight,
-  Smartphone,
-  CheckCircle2,
   AlertTriangle,
   QrCode,
-  User,
-  Radio,
-  Sparkles,
+  Smartphone,
 } from 'lucide-react';
+import ThemeToggle from '@/components/ui/ThemeToggle';
 
 function LoginFormContent() {
   const router = useRouter();
@@ -41,7 +36,6 @@ function LoginFormContent() {
   const [touristLoading, setTouristLoading] = useState(false);
   const [touristError, setTouristError] = useState<string | null>(null);
 
-  // Quick Preset Handlers
   const applyStaffPreset = (presetEmail: string, presetPass: string) => {
     setEmail(presetEmail);
     setPassword(presetPass);
@@ -52,28 +46,18 @@ function LoginFormContent() {
     e.preventDefault();
     setStaffLoading(true);
     setStaffError(null);
-
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       });
-
       const data = await res.json();
       if (!data.success) {
         setStaffError(data.error || 'Login failed. Please verify your credentials.');
         return;
       }
-
-      // Route based on role or redirect query param
-      if (redirect) {
-        router.push(redirect as any);
-      } else if (data.user.role === 'admin' || data.user.role === 'authority') {
-        router.push('/admin');
-      } else {
-        router.push('/admin');
-      }
+      router.push((redirect || '/admin') as any);
       router.refresh();
     } catch (err: any) {
       setStaffError(err.message || 'Connection error. Please try again.');
@@ -86,25 +70,18 @@ function LoginFormContent() {
     e.preventDefault();
     setTouristLoading(true);
     setTouristError(null);
-
     try {
       const res = await fetch('/api/auth/tourist-login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ identifier: touristIdentifier }),
       });
-
       const data = await res.json();
       if (!data.success) {
         setTouristError(data.error || 'Identity lookup failed.');
         return;
       }
-
-      if (redirect) {
-        router.push(redirect as any);
-      } else {
-        router.push('/citizen');
-      }
+      router.push((redirect || '/citizen') as any);
       router.refresh();
     } catch (err: any) {
       setTouristError(err.message || 'Connection error. Please try again.');
@@ -114,202 +91,136 @@ function LoginFormContent() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between selection:bg-blue-600 selection:text-white">
-      {/* 1. Official Government Header Strip */}
-      <div className="bg-slate-900 border-b border-slate-800 text-[11px] px-4 md:px-8 py-2 flex flex-wrap items-center justify-between text-slate-300 font-mono">
-        <div className="flex items-center gap-3">
-          <span className="text-amber-400 font-bold">🇮🇳 भारत सरकार | GOVERNMENT OF INDIA</span>
-          <span className="hidden sm:inline text-slate-600">|</span>
-          <span className="hidden sm:inline text-slate-400">MINISTRY OF TOURISM & HOME AFFAIRS</span>
-        </div>
-        <div className="text-emerald-400 font-bold">
-          ● SECURE AUTHENTICATION GATEWAY (FORM A-01)
-        </div>
+    <div className="min-h-screen bg-bg text-ink flex flex-col justify-between font-sans">
+      {/* Top bar */}
+      <div className="border-b-2 border-line px-4 md:px-8 py-3 flex items-center justify-between gap-2">
+        <Link href="/" className="flex items-center gap-2 font-black tracking-tight">
+          <ShieldCheck className="w-5 h-5 text-accent" /> PRAHARI
+        </Link>
+        <ThemeToggle />
       </div>
 
-      {/* 2. Main Login Container */}
       <main className="flex-1 flex items-center justify-center p-4 md:p-8">
         <div className="w-full max-w-lg space-y-6">
-          {/* Brand Logo & Title */}
+          {/* Brand */}
           <div className="text-center space-y-2">
-            <div className="inline-flex p-3 bg-gradient-to-tr from-blue-700 to-indigo-600 rounded-2xl text-white shadow-xl shadow-blue-600/30 mb-2">
+            <div className="inline-flex p-3 bg-accent text-accent-ink rounded-nb border-2 border-line shadow-nb mb-1">
               <ShieldCheck className="w-8 h-8" />
             </div>
-            <h1 className="text-2xl md:text-3xl font-black tracking-tight text-white">
-              PRAHARI ACCESS PORTAL
-            </h1>
-            <p className="text-xs text-slate-400 font-mono">
-              Role-Based Access Control • W3C Credential Verification • Government Dispatch
+            <h1 className="text-2xl md:text-3xl font-black tracking-tight text-ink">PRAHARI ACCESS PORTAL</h1>
+            <p className="text-xs text-ink-soft font-mono">
+              Role-Based Access Control • W3C Credential Verification • Govt Dispatch
             </p>
           </div>
 
           {/* Login Card */}
-          <div className="glass-panel p-6 md:p-8 rounded-3xl border border-slate-800 bg-slate-900/90 shadow-2xl space-y-6">
-            {/* Tab Selector */}
-            <div className="grid grid-cols-2 gap-2 p-1.5 bg-slate-950 rounded-2xl border border-slate-800 text-xs font-bold">
+          <div className="nb-card p-6 md:p-8 space-y-6">
+            {/* Tabs */}
+            <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
                 onClick={() => setActiveTab('staff')}
-                className={`py-2.5 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer ${
-                  activeTab === 'staff'
-                    ? 'bg-blue-600 text-white shadow-md'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
+                className={`nb-btn text-xs ${activeTab === 'staff' ? 'nb-btn-accent' : 'nb-btn-ghost !border-2'}`}
               >
-                <Building2 className="w-4 h-4" /> Staff & Authority
+                <Building2 className="w-4 h-4" /> Staff &amp; Authority
               </button>
-
               <button
                 type="button"
                 onClick={() => setActiveTab('tourist')}
-                className={`py-2.5 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer ${
-                  activeTab === 'tourist'
-                    ? 'bg-emerald-600 text-white shadow-md'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
+                className={`nb-btn text-xs ${activeTab === 'tourist' ? '!bg-[#15a34a] !text-white' : 'nb-btn-ghost !border-2'}`}
               >
-                <Smartphone className="w-4 h-4" /> Tourist & Citizen
+                <Smartphone className="w-4 h-4" /> Tourist &amp; Citizen
               </button>
             </div>
 
-            {/* TAB 1: STAFF LOGIN */}
+            {/* STAFF */}
             {activeTab === 'staff' && (
               <form onSubmit={handleStaffLogin} className="space-y-4 text-xs">
                 {staffError && (
-                  <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 flex items-center gap-2 font-medium">
-                    <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <div className="nb-card-flat bg-danger/10 border-danger p-3 flex items-center gap-2 font-bold" style={{ color: 'var(--nb-ink)' }}>
+                    <AlertTriangle className="w-4 h-4 shrink-0 text-danger" />
                     <span>{staffError}</span>
                   </div>
                 )}
-
                 <div className="space-y-1.5">
-                  <label className="block text-slate-300 font-bold uppercase tracking-wider text-[11px]">
-                    Official Government Email
-                  </label>
+                  <label className="block font-bold uppercase tracking-wider text-[11px]">Official Government Email</label>
                   <div className="relative">
-                    <Mail className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
+                    <Mail className="w-4 h-4 text-ink-soft absolute left-3 top-3 z-10" />
                     <input
-                      type="email"
-                      required
-                      placeholder="officer.sharma@police.gov.in"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-3 py-2.5 text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-blue-500 text-xs font-mono"
+                      type="email" required placeholder="officer.sharma@police.gov.in"
+                      value={email} onChange={(e) => setEmail(e.target.value)}
+                      className="nb-input pl-9 font-mono text-xs"
                     />
                   </div>
                 </div>
-
                 <div className="space-y-1.5">
-                  <label className="block text-slate-300 font-bold uppercase tracking-wider text-[11px]">
-                    Password
-                  </label>
+                  <label className="block font-bold uppercase tracking-wider text-[11px]">Password</label>
                   <div className="relative">
-                    <KeyRound className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
+                    <KeyRound className="w-4 h-4 text-ink-soft absolute left-3 top-3 z-10" />
                     <input
-                      type="password"
-                      required
-                      placeholder="••••••••••••"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-3 py-2.5 text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-blue-500 text-xs font-mono"
+                      type="password" required placeholder="••••••••••••"
+                      value={password} onChange={(e) => setPassword(e.target.value)}
+                      className="nb-input pl-9 font-mono text-xs"
                     />
                   </div>
                 </div>
-
-                <button
-                  type="submit"
-                  disabled={staffLoading}
-                  className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-                >
+                <button type="submit" disabled={staffLoading} className="nb-btn nb-btn-accent w-full !py-3">
                   {staffLoading ? 'Verifying Credentials...' : 'Authenticate & Open Command Console →'}
                 </button>
 
-                {/* Quick Presets for Demo */}
-                <div className="pt-4 border-t border-slate-800 space-y-2">
-                  <span className="text-[10px] uppercase font-mono text-slate-500 block text-center font-bold">
-                    ⚡ Quick Demo Credential Presets
+                {/* Presets */}
+                <div className="pt-4 border-t-2 border-line space-y-2">
+                  <span className="text-[10px] uppercase font-mono text-ink-soft block text-center font-bold">
+                    Quick demo credential presets
                   </span>
                   <div className="grid grid-cols-3 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => applyStaffPreset('officer.sharma@police.gov.in', 'Officer@123')}
-                      className="p-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded-xl text-center text-[10px] text-blue-400 font-mono transition cursor-pointer"
-                    >
-                      👮 Authority
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => applyStaffPreset('admin@prahari.gov.in', 'Admin@123')}
-                      className="p-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded-xl text-center text-[10px] text-amber-400 font-mono transition cursor-pointer"
-                    >
-                      🛡️ Admin
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => applyStaffPreset('unit17@dispatch.gov.in', 'Unit17@123')}
-                      className="p-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded-xl text-center text-[10px] text-emerald-400 font-mono transition cursor-pointer"
-                    >
-                      🚓 Unit #17
-                    </button>
+                    <button type="button" onClick={() => applyStaffPreset('officer.sharma@police.gov.in', 'Officer@123')}
+                      className="nb-btn nb-btn-ghost !border-2 !shadow-nb-sm text-[10px] font-mono !px-1">Authority</button>
+                    <button type="button" onClick={() => applyStaffPreset('admin@prahari.gov.in', 'Admin@123')}
+                      className="nb-btn nb-btn-ghost !border-2 !shadow-nb-sm text-[10px] font-mono !px-1">Admin</button>
+                    <button type="button" onClick={() => applyStaffPreset('unit17@dispatch.gov.in', 'Unit17@123')}
+                      className="nb-btn nb-btn-ghost !border-2 !shadow-nb-sm text-[10px] font-mono !px-1">Unit #17</button>
                   </div>
                 </div>
               </form>
             )}
 
-            {/* TAB 2: TOURIST LOGIN */}
+            {/* TOURIST */}
             {activeTab === 'tourist' && (
               <form onSubmit={handleTouristLogin} className="space-y-4 text-xs">
                 {touristError && (
-                  <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 flex items-center gap-2 font-medium">
-                    <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <div className="nb-card-flat bg-danger/10 border-danger p-3 flex items-center gap-2 font-bold">
+                    <AlertTriangle className="w-4 h-4 shrink-0 text-danger" />
                     <span>{touristError}</span>
                   </div>
                 )}
-
                 <div className="space-y-1.5">
-                  <label className="block text-slate-300 font-bold uppercase tracking-wider text-[11px]">
+                  <label className="block font-bold uppercase tracking-wider text-[11px]">
                     Decentralized Tourist ID (DID) or Tourist ID
                   </label>
                   <div className="relative">
-                    <QrCode className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
+                    <QrCode className="w-4 h-4 text-ink-soft absolute left-3 top-3 z-10" />
                     <input
-                      type="text"
-                      required
-                      placeholder="did:prahari:... or TOUR-7890"
-                      value={touristIdentifier}
-                      onChange={(e) => setTouristIdentifier(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-3 py-2.5 text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 text-xs font-mono"
+                      type="text" required placeholder="did:prahari:... or TOUR-7890"
+                      value={touristIdentifier} onChange={(e) => setTouristIdentifier(e.target.value)}
+                      className="nb-input pl-9 font-mono text-xs"
                     />
                   </div>
-                  <p className="text-[10px] text-slate-500">
+                  <p className="text-[10px] text-ink-soft">
                     Tourists verify using proof of DID credential ownership — no password required.
                   </p>
                 </div>
-
-                <button
-                  type="submit"
-                  disabled={touristLoading}
-                  className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-                >
+                <button type="submit" disabled={touristLoading} className="nb-btn w-full !py-3" style={{ background: '#15a34a', color: '#fff' }}>
                   {touristLoading ? 'Validating DID...' : 'Verify DID & Open Safety Hub →'}
                 </button>
-
-                {/* Quick Demo Preset & Onboarding Link */}
-                <div className="pt-4 border-t border-slate-800 space-y-3">
-                  <button
-                    type="button"
-                    onClick={() => setTouristIdentifier('TOUR-7890')}
-                    className="w-full p-2.5 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded-xl text-center text-xs text-emerald-400 font-mono transition cursor-pointer flex items-center justify-center gap-2"
-                  >
-                    <span>⚡ Quick Demo Tourist: <strong>TOUR-7890 (Ralston)</strong></span>
+                <div className="pt-4 border-t-2 border-line space-y-3">
+                  <button type="button" onClick={() => setTouristIdentifier('TOUR-7890')}
+                    className="nb-btn nb-btn-ghost !border-2 w-full text-xs font-mono">
+                    Quick demo tourist: <strong>TOUR-7890 (Ralston)</strong>
                   </button>
-
                   <div className="text-center pt-1">
-                    <Link
-                      href="/onboarding"
-                      className="text-slate-400 hover:text-white transition inline-flex items-center gap-1.5 text-xs font-semibold"
-                    >
-                      New Traveller to India? <span className="text-emerald-400 font-bold underline">Complete Onboarding Enrolment →</span>
+                    <Link href="/onboarding" className="text-ink-soft hover:text-accent transition inline-flex items-center gap-1.5 text-xs font-bold">
+                      New Traveller to India? <span className="text-accent-strong font-black underline">Complete Onboarding →</span>
                     </Link>
                   </div>
                 </div>
@@ -317,9 +228,8 @@ function LoginFormContent() {
             )}
           </div>
 
-          {/* Footer note */}
-          <div className="text-center text-[11px] font-mono text-slate-500 flex items-center justify-center gap-2">
-            <Lock className="w-3.5 h-3.5 text-slate-400" />
+          <div className="text-center text-[11px] font-mono text-ink-soft flex items-center justify-center gap-2">
+            <Lock className="w-3.5 h-3.5" />
             <span>Digital Personal Data Protection (DPDP) Act 2023 Aligned</span>
           </div>
         </div>
@@ -330,7 +240,7 @@ function LoginFormContent() {
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-slate-950 text-white flex items-center justify-center font-mono">Loading authentication portal...</div>}>
+    <Suspense fallback={<div className="min-h-screen bg-bg text-ink flex items-center justify-center font-mono">Loading authentication portal...</div>}>
       <LoginFormContent />
     </Suspense>
   );

@@ -25,11 +25,11 @@ export type AuthResult = AuthResultSuccess | AuthResultFailure;
  * const { session } = auth;
  * ```
  */
-export function requireAuth(
+export async function requireAuth(
   request: NextRequest,
   allowedRoles?: UserRole[]
-): AuthResult {
-  const session = getSessionFromRequest(request);
+): Promise<AuthResult> {
+  const session = await getSessionFromRequest(request);
 
   if (!session) {
     return {

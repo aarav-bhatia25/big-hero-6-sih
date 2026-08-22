@@ -15,21 +15,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Lookup in database
+    // Lookup in database. A tourist may authenticate with either their DID or
+    // their Tourist ID. We deliberately do NOT fabricate a session for an
+    // unknown identifier — the record must exist (created via onboarding/seed).
     let tourist = await getTouristByIdOrDid(searchId);
     if (!tourist) {
       tourist = await getTourist(searchId);
-    }
-
-    // If still not found, check if it's the demo tourist ID
-    if (!tourist && (searchId === 'TOUR-7890' || searchId.includes('TOUR-7890') || searchId.includes('did:prahari:'))) {
-      tourist = {
-        touristId: 'TOUR-7890',
-        name: 'Ralston',
-        nationality: 'India',
-        did: searchId.startsWith('did:') ? searchId : 'did:prahari:5jV2wL9q8yZ...',
-        identityStatus: 'verified',
-      };
     }
 
     if (!tourist) {
@@ -46,7 +37,7 @@ export async function POST(request: NextRequest) {
     const resolvedTouristId = tourist.touristId || 'TOUR-7890';
     const resolvedDid = tourist.did || `did:prahari:${resolvedTouristId}`;
 
-    const sessionToken = createSessionToken({
+    const sessionToken = await createSessionToken({
       userId: resolvedTouristId,
       role: 'tourist',
       name: tourist.name || 'Tourist Traveller',

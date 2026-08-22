@@ -1,7 +1,27 @@
+import os
+
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 app = FastAPI(title="Prahari Risk Service", version="0.1.0")
+
+# The citizen page calls /risk-score directly from the browser, so the service
+# must send CORS headers or every request is blocked and the UI silently falls
+# back to the local scoring engine. Allow the web app origin(s).
+_default_origins = "http://localhost:3000,http://127.0.0.1:3000"
+_allowed_origins = [
+    o.strip()
+    for o in os.environ.get("ALLOWED_ORIGINS", _default_origins).split(",")
+    if o.strip()
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_allowed_origins,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 class RiskFeatures(BaseModel):
     route_deviation_m: float = Field(ge=0, default=0)

@@ -71,6 +71,8 @@ Working end-to-end against Supabase Postgres.
 | 25 | **E-FIR officer verification workflow** — PATCH endpoint for approve/reject; review panel with status badges in admin dashboard | `app/api/efir/route.ts`, `app/admin/page.tsx` |
 | 26 | **Authentication** — Stateless signed session tokens (`prahari_session`), staff email/password login, tourist DID login, auto-session on enrolment | `lib/auth/session.ts`, `app/api/auth/*`, `app/login/page.tsx` |
 | 27 | **Role-Based Access Control (RBAC)** — Four roles (`admin`, `authority`, `responder`, `tourist`), edge middleware protection, and API route guards | `lib/auth/guards.ts`, `middleware.ts`, `supabase/migrations/003_auth_rbac.sql` |
+| 28 | **Blockchain credential anchoring** — 5 contracts compiled & deployed; each credential hash anchored on-chain on issuance (real tx hash), independent on-chain verification, tx hash shown in the ID card | `packages/contracts`, `lib/blockchain/registry.ts`, `app/api/identity/{issue,verify}`, `components/tourist/DigitalIdCard.tsx` |
+| 39 | **Neobrutalist UI + dark mode** — token-driven design system, sky-blue accent, Google-grey dark, in-navbar theme toggle across every page | `app/globals.css`, `tailwind.config.ts`, `components/ui/ThemeToggle.tsx` |
 
 ### 2.2 🟡 Partial
 
@@ -80,20 +82,35 @@ No features remain in this category — all former partials were completed.
 
 | # | Feature | Note |
 |---|---|---|
-| 28 | **Blockchain integration** | Five contracts written and reviewed; never compiled, never deployed, no client wiring ← **Block 3, next up** |
 | 29 | Emergency-contact alerting (SMS/email/push) | Contacts are stored but never notified |
-| 30 | Anomaly detection — signal drop, inactivity, route deviation | Core to the "proactive" claim |
+| 30 | Anomaly detection — signal drop, inactivity, route deviation | Core to the "proactive" claim; ML service is wired (#22) but only zone/time features are fed today |
 | 31 | Predictive ML behaviour analysis | Only the rule-based baseline exists |
 | 32 | Live disaster / environmental hazard overlay | No NDMA/IMD feed |
 | 33 | Offline downloadable regional maps | Placeholder modal |
 | 34 | Dynamic risk heatmaps | Not started |
 | 35 | Tiered consent (Basic ID → Tracking → Family Sharing) | Single boolean today |
 | 36 | End-to-end encryption | Not started |
-| 37 | Tamper-evident blockchain audit trail | Depends on #28 |
+| 37 | Tamper-evident blockchain audit trail | **Identity anchoring is done (#28).** Incident/geofence anchoring + audit-trail UI is Block 4 |
 
-**Summary: 27 implemented · 0 partial · 10 not implemented.**
+### Caveats on features marked ✅ (read before demoing)
 
-_Last updated: 2026-08-23, end of Block 2 (Authentication & RBAC complete)._
+- **#22 ML risk integration** — the citizen page calls the FastAPI service from the
+  browser and falls back to the local engine when it is unreachable. It only
+  produces a live "ML SERVICE" badge when `services/ml` is running **and**
+  reachable with CORS (fixed 2026-08-23). Only `zone_risk` + `hour_of_day` are
+  real inputs; `route_deviation` / `inactivity` are stubbed to 0 until #30.
+- **#24 Multilingual voice SOS** — this is the **browser-native Web Speech API**
+  (Chrome/Edge only), not Sarvam. It does live STT in 8 Indian languages but
+  performs **no translation or TTS**. Full Sarvam integration remains Block 8.
+- **#20 Breach → incident** — now created **authoritatively server-side** in
+  `POST /api/locations` with a 30-min dedup window. The earlier duplicate
+  client-side creation was removed 2026-08-23.
+
+**Summary: 30 implemented (2 with caveats above) · 0 partial · 9 not implemented.**
+
+_Last updated: 2026-08-23. Blocks 1, 2, 3 (blockchain identity anchoring), 5, and the
+UI redesign (11) are complete; Block 2 was also hardened. See §8 for per-block handoff
+notes (blockchain is the last section)._
 
 ---
 
@@ -104,15 +121,32 @@ Work proceeds in blocks. Each block ends with a demoable increment.
 | # | Block | Delivers | External keys |
 |---|---|---|---|
 | ~~1~~ | ~~Identity & eKYC foundation~~ | ✅ **DONE** — Aadhaar + passport verification, DID, signed VC | none |
-| ~~2~~ | ~~Auth & role-based access control~~ | ✅ **DONE** — Four roles (`admin`, `authority`, `responder`, `tourist`), edge middleware, login portal, API route guards | **None** |
-| **3** | **Blockchain — deploy & anchor identity** | ← **NEXT.** Contracts live on Sepolia; credentials anchored | Alchemy RPC + burner wallet |
-| 4 | Blockchain — incident & geofence anchoring | Tamper-evident audit trail with Etherscan links | (same) |
-| 5 | Real-time & automation | Socket.IO subscriptions; breach automatically raises an incident | None |
-| 6 | Anomaly detection & ML wiring | Signal-drop, inactivity, route deviation; ML service connected | None |
+| ~~2~~ | ~~Auth & role-based access control~~ | ✅ **DONE & HARDENED** — four roles, edge middleware, login portal, API route guards; real HMAC-SHA256 session tokens | **None** |
+| ~~5~~ | ~~Real-time & automation (partial)~~ | ✅ **DONE** — Socket.IO subscriptions; breach → incident server-side (#20, #21) | None |
+| ~~6~~ | ~~ML wiring (partial)~~ | 🟡 **PARTIAL** — ML service connected with fallback (#22); anomaly detection (signal-drop/inactivity/route-deviation) still #30 | None |
+| ~~8~~ | ~~Voice SOS (partial)~~ | 🟡 **PARTIAL** — browser-native STT done (#24); Sarvam translation/TTS outstanding | Sarvam AI (for full) |
+| ~~11~~ | ~~Neobrutalism redesign~~ | ✅ **DONE** — sky-blue accent, Google-grey dark mode, thick borders / hard shadows, in-navbar theme toggle, across every page. Slop/emoji chrome removed | None |
+| ~~3~~ | ~~Blockchain — deploy & anchor identity~~ | ✅ **DONE** — 5 contracts compiled & deployed; credential hashes anchored on-chain on issuance with real tx hashes; independent on-chain verification; tx hash shown in the ID card | None (local Hardhat); Alchemy RPC + burner wallet only for Sepolia |
+| **4** | **Blockchain — incident & geofence anchoring** | ← **NEXT BLOCK.** Anchor incident + geofence events (contracts already deployed), add an audit-trail UI with explorer links | None (local); same as above for Sepolia |
+| 6b | Anomaly detection | Feed route-deviation / inactivity / signal-drop into the ML client | None |
 | 7 | Emergency-contact alerting | SMS/email on incident and anomaly | Twilio (+ SendGrid) |
-| 8 | Multilingual & voice SOS | Real STT, translation, TTS | Sarvam AI |
+| 8b | Full Sarvam voice | Translation + TTS on top of the existing STT | Sarvam AI |
 | 9 | Hazard overlay & heatmaps | Disaster feeds, historical risk density | NDMA/IMD/weather |
 | 10 | Privacy hardening | Offline maps, consent tiers, E2E encryption | None |
+
+### What is demoable *today* (the core project is already implemented)
+
+The end-to-end product works right now against the real database: onboarding →
+Aadhaar/passport verification → DID + signed credential → login/RBAC → live map
+with geofences → telemetry → automatic breach-to-incident → nearest-unit dispatch
+→ E-FIR draft + officer sign-off → risk scoring → realtime dashboard — all in a
+consistent neobrutalist UI with light/dark themes. **eKYC and geofencing are DONE
+(Blocks 1 and the geospatial engine), not pending.** What remains (blocks above)
+are advanced add-ons: on-chain anchoring, anomaly detection, external alerting,
+full Sarvam voice, hazard feeds, and privacy hardening.
+
+**Realistic completion:** the marquee remaining feature is **blockchain (Blocks 3–4)**.
+Everything else is independent and can be picked up in any order by the next owner.
 
 ### Standing technical decisions
 
@@ -326,6 +360,115 @@ The design workflow script is saved and can be re-run cheaply:
 .claude/projects/-Users-arav-Desktop-Prahari-apps-web/…/workflows/scripts/prahari-auth-design-wf_fb515864-125.js
 ```
 
+#### Block 2 hardening — 2026-08-23 (bug fixes on the handed-off branch)
+
+A review of the auth work found six defects; all are fixed and verified live
+(anonymous → 401, real login → 200, forged token → 401, wrong password → 401):
+
+1. **🔴 Forgeable session tokens.** `lib/auth/session.ts` signed tokens with a
+   32-bit FNV-1a hash (not a MAC) that also **appended the first 8 chars of the
+   signing secret to every token**. Replaced with real **HMAC-SHA256 via Web
+   Crypto** (`crypto.subtle`), which runs in both the Edge middleware and Node
+   routes. `createSessionToken` / `verifySessionToken` / `getSessionFromRequest`
+   / `requireAuth` are now **async** — every call site was updated to `await`.
+   Signature comparison is constant-time.
+2. **🔴 Build break.** `seed/route.ts` declared `POST(request?: NextRequest)`;
+   the optional param fails Next's generated route types (`tsc` errored). Made
+   the parameter required; bootstrap-seed logic preserved.
+3. **🟠 Tourist-login fabrication.** `tourist-login` minted a valid session for
+   any string containing `did:prahari:`. Removed — the tourist record must exist.
+4. **🟠 Login backdoor.** After a failed password check, `login` re-checked the
+   hardcoded default password and let the user in anyway (a permanent backdoor
+   surviving password changes). Removed; the stored hash is now the sole authority.
+5. **🟡 Duplicate breach incident.** A geofence breach created an incident twice
+   (client-side in `citizen/page.tsx` **and** server-side in `/api/locations`).
+   Kept the authoritative server-side path; removed the client duplicate and its
+   stray socket emit.
+6. **🟡 ML never reachable.** The browser called the FastAPI service at `:8000`,
+   which sent no CORS headers, so every call failed and silently fell back to
+   local. Added `CORSMiddleware` to `services/ml/app/main.py` (origins via
+   `ALLOWED_ORIGINS`, default `localhost:3000`). Restart the ML service to apply.
+
+> **Still open (not a regression, a design gap):** tourist login is
+> **password-less** — presenting a known Tourist ID / DID is enough. For a real
+> deployment, require proof of credential ownership (e.g. the credential-hash
+> `?h=` from the QR, or a signed challenge). Fine for the sandbox demo; flagged
+> so it is a deliberate choice, not an oversight.
+
+### Design system (Block 11 — neobrutalism)
+
+The whole UI is token-driven so both themes and the neobrutalist look come from
+one place. Do **not** hardcode hex colours in pages any more — use the tokens.
+
+- **Tokens** live in `apps/web/app/globals.css` under `:root` (light) and `.dark`
+  (Google grey). Accent is sky blue. Key CSS vars: `--nb-bg`, `--nb-surface`,
+  `--nb-surface-2`, `--nb-ink`, `--nb-ink-soft`, `--nb-border`, `--nb-accent`,
+  `--nb-accent-strong`, `--nb-accent-ink`, `--nb-shadow`.
+- **Tailwind utilities** (in `tailwind.config.ts`) map onto those: `bg-bg`,
+  `bg-surface`, `bg-surface-2`, `text-ink`, `text-ink-soft`, `border-line`,
+  `bg-accent` / `text-accent` / `text-accent-strong` / `text-accent-ink`,
+  `shadow-nb` / `shadow-nb-sm` / `shadow-nb-lg`, `rounded-nb`. Status colours:
+  `success` / `danger` / `warning`.
+- **Component classes** (globals.css `@layer components`): `.nb-card`,
+  `.nb-card-flat`, `.nb-inset`, `.nb-btn` (+ `.nb-btn-accent` / `.nb-btn-danger`
+  / `.nb-btn-ghost`), `.nb-input`, `.nb-chip` / `.nb-chip-accent`. Buttons carry
+  the thick border, hard offset shadow, and press-down interaction.
+- **Dark mode**: a no-flash inline script in `app/layout.tsx` sets `.dark` before
+  paint from `localStorage.theme` or `prefers-color-scheme`. The toggle is
+  `components/ui/ThemeToggle.tsx`, placed **in each page's top navbar** (landing,
+  login, citizen, admin), not floating.
+- **Font**: Space Grotesk via `next/font` (`--font-sans`).
+- Marketing "slop" (fake summit/status chrome, gov strip) and all emojis were
+  removed; icons come from `lucide-react`, map markers use plain glyphs/dots.
+
+### Block 3 — Blockchain credential anchoring (✅ done)
+
+Every issued credential's hash is anchored on-chain so it can be independently
+verified and proven un-tampered. **Only the hash goes on-chain — never PII.**
+Runs on a local Hardhat chain out of the box; Sepolia is a config swap.
+
+**What was built**
+- Contracts compiled & deployed: `packages/contracts` (`TouristIdentityRegistry`
+  + 3 others). Deployed addresses are written to
+  `packages/contracts/deployments/localhost.json`.
+- `apps/web/lib/blockchain/registry.ts` — ethers client. `anchorCredential()`
+  writes `registerCredential(hash, expiresAt)` (idempotent — skips if already
+  on-chain); `verifyOnChain()` reads `verifyCredential(hash)`. Both return null
+  if the chain is unconfigured/unreachable, so issuance never fails.
+- `POST /api/identity/issue` anchors after saving and stores the tx hash on the
+  tourist row; `POST /api/seed` anchors the demo tourist; `GET /api/identity/verify/[did]`
+  returns a `blockchain` block (`anchored`, `valid`, `state`, `chainId`, `txHash`).
+- `DigitalIdCard` shows an "Anchored on-chain" badge with the tx hash (and an
+  Etherscan link when on Sepolia).
+- `supabase/migrations/004_blockchain.sql` adds `tourists."anchorTxHash"` +
+  `"anchorChainId"`. **Already applied to the live database.**
+
+**Verified working (2026-08-23):** issuing a credential produced a real tx
+(`0x5782…3c56`) on chainId 31337; `verifyCredential` returns `Active`;
+`totalIssuedCredentials` incremented on-chain.
+
+**Run the chain locally** (two background services must be up alongside web + realtime):
+```
+cd packages/contracts
+pnpm exec hardhat node                       # terminal A — JSON-RPC on :8545
+pnpm run deploy:local                        # terminal B — deploys + writes deployments/localhost.json
+```
+Then set in `apps/web/.env.local` (already set for local dev):
+`CHAIN_RPC_URL=http://127.0.0.1:8545`, `CHAIN_ID=31337`,
+`IDENTITY_REGISTRY_ADDRESS=<TouristIdentityRegistry from the deploy output>`,
+`ANCHOR_PRIVATE_KEY=<Hardhat account #0 key>` (the well-known public test key —
+local only, never use it anywhere real).
+
+**Move to Sepolia (public, verifiable):** deploy with `deploy:sepolia` (needs
+`ALCHEMY_SEPOLIA_URL` + a faucet-funded `DEPLOYER_PRIVATE_KEY` in
+`packages/contracts`), then point the web env at the Alchemy URL, the new
+address, a funded `ANCHOR_PRIVATE_KEY`, and `CHAIN_ID=11155111`. No code change —
+the ID card auto-shows Etherscan links for chainId 11155111.
+
+> **Note:** a local Hardhat node holds state only while it runs. Restarting it
+> wipes anchors; just re-run `deploy:local` and re-seed. For persistence across
+> restarts, use Sepolia.
+
 ### Known issues, unrelated to any block
 
 - **`pnpm lint` is broken.** There is no ESLint config anywhere in the repo and
@@ -336,8 +479,6 @@ The design workflow script is saved and can be re-run cheaply:
 - **Dead code**: `components/dashboard/*` (6 files) and
   `components/map/live-map.tsx` are rendered by nothing. They are the only
   consumers of `lib/mock-data.ts`.
-- **Citizen risk scoring** connects to the FastAPI ML service via `mlRiskClient.ts`
-  with automatic fallback to the deterministic local engine when ML is offline.
 - **`tsconfig` target is ES2020** (raised from ES2017 for BigInt literals used
   in base58 encoding). If you see `TS2737`, delete `tsconfig.tsbuildinfo` —
   incremental builds cache the old target.
@@ -359,3 +500,31 @@ The design workflow script is saved and can be re-run cheaply:
 - RLS is enabled on every table with **no permissive policies**. The
   publishable key reads nothing. This is intentional: if that key ever leaks
   into browser code, tourist location data is not world-readable.
+
+### ML datasets for Block 6/6b (candidate — not yet integrated)
+
+Two open datasets were proposed to move the risk model beyond the rule-based
+baseline. Recorded here so the plan is not lost; **nothing below is wired yet.**
+
+- **Indian city geolocations** — `crbelhekar619/geolocations-of-indian-cities`
+  (city → lat/lon).
+- **Crime in India** — `sumedh1507/crime-in-india-dataset` (district-level
+  incident counts).
+
+**Proposed pipeline** (offline, produces a training table; the live service
+stays a thin scorer):
+
+1. Group crime by district, `MinMaxScale` total incidents → `historical_risk_score` (0–1).
+2. Lowercase/trim names on both sides, inner-join city↔district on name.
+3. Result `master_risk_map`: `[city, lat, lon, historical_risk_score]`.
+4. Synthesise ~10k tourist pings by sampling the map with replacement; add
+   `hour_of_day` (0–23) and `crowd_density` (0–1000) as dynamic features.
+5. Train an **Isolation Forest** on
+   `[lat, lon, historical_risk_score, hour_of_day, crowd_density]` for anomaly
+   scoring, versioned and evaluated before it replaces the baseline in
+   `services/ml/app/main.py`.
+
+**Caveats to resolve first:** city↔district name joins are lossy (spelling,
+"district" ≠ "city"); crime counts need normalising per-capita/area, not raw;
+and an Isolation Forest gives an *anomaly* score, not a calibrated risk — decide
+how it maps onto the current 0–100 `zone_risk` the API already returns.

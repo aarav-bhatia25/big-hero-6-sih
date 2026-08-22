@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { kycProvider } from "@/lib/kyc/sandboxProvider";
 import { issueCredential } from "@/lib/identity/credential";
 import {
-  upsertTourist, getTouristBySubjectHash, logCredentialIssuance, isSupabaseConfigured,
+  upsertTourist, getTouristBySubjectHash, logCredentialIssuance, updateTourist, isSupabaseConfigured,
 } from "@/lib/db";
 import { createSessionToken, setSessionCookie } from "@/lib/auth/session";
+import { anchorCredential } from "@/lib/blockchain/registry";
 
 export const dynamic = "force-dynamic";
 
@@ -77,7 +78,25 @@ export async function POST(request: NextRequest) {
       action: existing ? "reinstated" : "issued",
     });
 
-    const sessionToken = createSessionToken({
+    // Anchor the credential hash on-chain (best-effort — never blocks issuance).
+    // Only the hash goes on-chain; no PII. Returns null if no chain is configured.
+    let anchor: { txHash: string; chainId: number; alreadyAnchored?: boolean } | null = null;
+    try {
+      const result = await anchorCredential(issued.credentialHash, issued.expiresAt);
+      if (result) {
+        anchor = result;
+        if (result.txHash) {
+          await updateTourist(touristId, {
+            anchorTxHash: result.txHash,
+            anchorChainId: result.chainId,
+          });
+        }
+      }
+    } catch (err) {
+      console.warn("[prahari] anchoring skipped:", err);
+    }
+
+    const sessionToken = await createSessionToken({
       userId: touristId,
       role: 'tourist',
       name: subject.fullName,
@@ -94,6 +113,9 @@ export async function POST(request: NextRequest) {
       expiresAt: issued.expiresAt,
       credential: issued.credential,
       reissued: Boolean(existing),
+      anchorTxHash: anchor?.txHash || null,
+      anchorChainId: anchor?.chainId ?? null,
+      anchored: Boolean(anchor),
       token: sessionToken,
     });
 

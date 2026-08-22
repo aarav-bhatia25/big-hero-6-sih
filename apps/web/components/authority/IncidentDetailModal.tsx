@@ -55,7 +55,7 @@ export default function IncidentDetailModal({
                 <Shield className="w-3.5 h-3.5 text-red-400" /> Calculated Risk
               </span>
               <span className="font-bold text-red-400 text-lg">{incident.riskScore || 91}/100</span>
-              <p className="text-[11px] text-red-300">🔴 Critical Action Threshold</p>
+              <p className="text-[11px] text-red-300">Critical Action Threshold</p>
             </div>
           </div>
 

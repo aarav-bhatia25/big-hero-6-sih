@@ -5,7 +5,7 @@ import { requireAuth } from "@/lib/auth/guards";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
-  const auth = requireAuth(request, ['authority', 'admin', 'responder']);
+  const auth = await requireAuth(request, ['authority', 'admin', 'responder']);
   if (auth.errorResponse) return auth.errorResponse;
 
   try {

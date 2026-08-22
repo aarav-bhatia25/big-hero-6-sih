@@ -4,6 +4,7 @@ import { hashSubject } from "@/lib/kyc/hash";
 import { kycProvider } from "@/lib/kyc/sandboxProvider";
 import {
   upsertTourist,
+  updateTourist,
   logCredentialIssuance,
   insertLocation,
   replaceGeofences,
@@ -13,10 +14,11 @@ import {
   listUsers,
   isSupabaseConfigured,
 } from "@/lib/db";
+import { anchorCredential } from "@/lib/blockchain/registry";
 import { hashPassword } from "@/lib/auth/crypto";
 import { requireAuth } from "@/lib/auth/guards";
 
-export async function POST(request?: NextRequest) {
+export async function POST(request: NextRequest) {
   if (!isSupabaseConfigured) {
     return NextResponse.json(
       {
@@ -28,13 +30,12 @@ export async function POST(request?: NextRequest) {
     );
   }
 
-  // Allow unauthenticated seed ONLY if database has 0 users (initial bootstrap)
-  if (request) {
-    const existingUsers = await listUsers();
-    if (existingUsers.length > 0) {
-      const auth = requireAuth(request, ['admin']);
-      if (auth.errorResponse) return auth.errorResponse;
-    }
+  // Allow unauthenticated seed ONLY if database has 0 users (initial bootstrap).
+  // Once any user exists, seeding is an admin-only operation.
+  const existingUsers = await listUsers();
+  if (existingUsers.length > 0) {
+    const auth = await requireAuth(request, ['admin']);
+    if (auth.errorResponse) return auth.errorResponse;
   }
 
   try {
@@ -100,6 +101,19 @@ export async function POST(request?: NextRequest) {
       kycProvider: kycProvider.id,
       action: "issued",
     });
+
+    // 1b. Anchor the seeded credential on-chain (best-effort, non-fatal).
+    try {
+      const anchor = await anchorCredential(seedIdentity.credentialHash, seedIdentity.expiresAt);
+      if (anchor?.txHash) {
+        await updateTourist("TOUR-7890", {
+          anchorTxHash: anchor.txHash,
+          anchorChainId: anchor.chainId,
+        });
+      }
+    } catch (err) {
+      console.warn("[prahari] seed anchoring skipped:", err);
+    }
 
     // 2. Initial location ping
     await insertLocation({

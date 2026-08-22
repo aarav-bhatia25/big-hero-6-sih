@@ -4,7 +4,7 @@ import { emitToGateway } from '@/lib/services/gatewayEmit';
 import { requireAuth } from '@/lib/auth/guards';
 
 export async function POST(request: NextRequest) {
-  const auth = requireAuth(request, ['tourist', 'authority', 'admin', 'responder']);
+  const auth = await requireAuth(request, ['tourist', 'authority', 'admin', 'responder']);
   if (auth.errorResponse) return auth.errorResponse;
 
   const { session } = auth;
@@ -66,7 +66,7 @@ export async function POST(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest) {
-  const auth = requireAuth(request, ['authority', 'admin', 'responder']);
+  const auth = await requireAuth(request, ['authority', 'admin', 'responder']);
   if (auth.errorResponse) return auth.errorResponse;
 
   try {
@@ -83,7 +83,7 @@ export async function GET(request: NextRequest) {
  * Accepts: { incidentId, action: 'APPROVE' | 'REJECT', officerName?, officerBadge?, remarks? }
  */
 export async function PATCH(request: NextRequest) {
-  const auth = requireAuth(request, ['authority', 'admin']);
+  const auth = await requireAuth(request, ['authority', 'admin']);
   if (auth.errorResponse) return auth.errorResponse;
 
   const { session } = auth;

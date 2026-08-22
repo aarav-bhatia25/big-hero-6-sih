@@ -35,7 +35,7 @@ const ClientMap = dynamic(() => import('./ClientMapInner'), {
   ssr: false,
   loading: () => (
     <div className="w-full h-[400px] bg-slate-900 animate-pulse rounded-2xl flex items-center justify-center text-slate-500 font-mono text-sm border border-slate-800">
-      📍 Loading Interactive Safety Map Engine...
+      Loading Interactive Safety Map Engine...
     </div>
   ),
 });

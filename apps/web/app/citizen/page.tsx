@@ -25,10 +25,10 @@ import MapView from '@/components/maps/MapView';
 import { calculateDeterministicRisk } from '@/lib/risk';
 import { checkPointInGeofence } from '@/lib/geospatial';
 import { fetchMLRiskScore, type MLRiskResult } from '@/lib/services/mlRiskClient';
-import { getSocket } from '@/lib/socket';
+import ThemeToggle from '@/components/ui/ThemeToggle';
 
 export default function CitizenPage() {
-  const [greeting, setGreeting] = useState('Good morning, Tourist');
+  const [greeting, setGreeting] = useState('Good morning');
   const [coords, setCoords] = useState<{ lat: number; lng: number }>({ lat: 19.076, lng: 72.8777 });
   const [locationConsent, setLocationConsent] = useState(true);
   const [activeModal, setActiveModal] = useState<'none' | 'id_pass' | 'efir' | 'attire' | 'voice' | 'offline_map'>('none');
@@ -59,8 +59,6 @@ export default function CitizenPage() {
   const [mlRisk, setMlRisk] = useState<MLRiskResult | null>(null);
   const [riskSource, setRiskSource] = useState<'local' | 'ml'>('local');
 
-  // Geofence breach dedup guard
-  const breachCreatedRef = useRef(false);
 
   // Geofence & Risk State
   const [geofences, setGeofences] = useState<any[]>([]);
@@ -162,40 +160,9 @@ export default function CitizenPage() {
     routeAnomalyScore: mlRisk ? Math.min(20, mlRisk.score * 0.2) : 0,
   });
 
-  // ── Auto-create incident on geofence breach (#20) ──────────────
-  useEffect(() => {
-    if (gfCheck.isBreached && gfCheck.breachedZone && !breachCreatedRef.current && touristId) {
-      breachCreatedRef.current = true;
-      const createBreachIncident = async () => {
-        try {
-          const res = await fetch('/api/incidents', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              type: 'GEOFENCE_BREACH',
-              touristId,
-              touristName: tourist?.name || touristId,
-              location: { lat: coords.lat, lng: coords.lng, address: `Inside ${gfCheck.breachedZone!.name}` },
-              severity: gfCheck.breachedZone!.severity,
-              status: 'ACTIVE',
-            }),
-          });
-          const data = await res.json();
-          if (data.success && data.incident) {
-            setActiveIncident(data.incident);
-            // Emit to socket for real-time dashboard update
-            try { getSocket().emit('incident:create', data.incident); } catch {}
-          }
-        } catch (err) {
-          console.error('[prahari] breach incident creation failed:', err);
-        }
-      };
-      createBreachIncident();
-    }
-    if (!gfCheck.isBreached) {
-      breachCreatedRef.current = false;
-    }
-  }, [gfCheck.isBreached, gfCheck.breachedZone, touristId, coords.lat, coords.lng, tourist?.name]);
+  // Geofence breach → incident is handled authoritatively server-side in
+  // POST /api/locations (with a 30-minute dedup window) when telemetry is
+  // ingested, so the client does not create a duplicate incident here.
 
   // Handle Save Clothing Profile
   const handleSaveAttire = async (e: React.FormEvent) => {
@@ -226,7 +193,7 @@ export default function CitizenPage() {
         body: JSON.stringify({
           incidentId: activeIncident?.incidentId,
           touristId,
-          touristName: 'Demo Tourist',
+          touristName: tourist?.name,
           passportAadhaar: 'IND-P892100',
           incidentType: activeIncident ? activeIncident.type : 'Emergency SOS Panic Alert',
           location: coords,
@@ -327,54 +294,38 @@ export default function CitizenPage() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-[#F7F5F0] text-[#14213D] font-sans selection:bg-[#14213D] selection:text-white pb-12">
-      {/* 1. Official Government Top Letterhead Header Bar */}
-      <div className="bg-[#14213D] text-white text-[11px] px-4 md:px-8 py-2 border-b-2 border-[#D8D2C4] flex flex-wrap items-center justify-between font-mono">
-        <div className="flex items-center gap-3">
-          <span className="font-bold text-amber-400">🇮🇳 भारत सरकार | GOVERNMENT OF INDIA</span>
-          <span className="hidden sm:inline text-slate-400">|</span>
-          <span className="hidden sm:inline text-slate-300">MINISTRY OF TOURISM & HOME AFFAIRS</span>
-        </div>
-        <div className="flex items-center gap-4 text-[11px]">
-          <span>FORM REF: T-101</span>
-          <span>● NATIONAL SAFETY NODE ONLINE</span>
-        </div>
-      </div>
-
-      {/* 2. Portal Header */}
-      <header className="bg-white border-b border-[#D8D2C4] px-4 md:px-8 py-4 flex flex-wrap items-center justify-between gap-3">
+    <div className="min-h-screen bg-bg text-ink font-sans selection:bg-accent selection:text-accent-ink pb-12">
+      {/* Portal Header */}
+      <header className="bg-surface border-b-2 border-line px-4 md:px-8 py-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3.5">
-          <div className="p-2.5 bg-[#14213D] text-white rounded">
+          <div className="p-2.5 bg-accent text-accent-ink rounded-nb border-2 border-line">
             <Building2 className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="font-serif font-bold text-[#14213D] text-xl tracking-tight leading-none">
-              Prahari Tourist Safety & Digital Permit Portal
+            <h1 className="font-black text-ink text-xl tracking-tight leading-none">
+              Prahari Tourist Safety &amp; Digital Permit Portal
             </h1>
-            <p className="text-xs text-slate-600 font-mono mt-1">
-              National Digital Tourist Security Framework • Verifiable Credentials • Emergency Dispatch
+            <p className="text-xs text-ink-soft mt-1">
+              Digital Tourist Security • Verifiable Credentials • Emergency Dispatch
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-3">
-          <Link
-            href="/admin"
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-[#14213D] hover:bg-[#1C2D52] text-white rounded text-xs font-bold transition cursor-pointer border border-[#14213D]"
-          >
-            <Radio className="w-3.5 h-3.5" /> Authority Command Portal →
+          <Link href="/admin" className="nb-btn nb-btn-accent text-xs">
+            <Radio className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Authority Command</span> →
           </Link>
-
           <button
             onClick={async () => {
               await fetch('/api/auth/logout', { method: 'POST' });
               window.location.href = '/login';
             }}
             title="Logout"
-            className="p-2 bg-white hover:bg-red-50 text-slate-600 hover:text-red-600 rounded border border-[#D8D2C4] hover:border-red-300 transition cursor-pointer"
+            className="nb-btn nb-btn-ghost !border-2 h-9 w-9 !px-0"
           >
             <LogOut className="w-4 h-4" />
           </button>
+          <ThemeToggle />
         </div>
       </header>
 
@@ -383,61 +334,61 @@ export default function CitizenPage() {
         {/* Welcome Letterhead & Restrained Risk Gauge */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {/* Official Traveller Registration Record */}
-          <div className="md:col-span-2 bg-white p-5 rounded-md border border-[#D8D2C4] flex flex-col justify-between">
+          <div className="md:col-span-2 bg-surface p-5 rounded-nb border-2 border-line flex flex-col justify-between">
             <div className="space-y-2">
-              <div className="flex items-center justify-between border-b border-[#D8D2C4] pb-2">
-                <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-500">
+              <div className="flex items-center justify-between border-b-2 border-line pb-2">
+                <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-ink-soft">
                   REGISTRATION RECORD NO. DTI-2026-891
                 </span>
-                <span className="text-[11px] font-mono font-bold text-[#1B5E3C] bg-emerald-50 px-2 py-0.5 rounded border border-[#1B5E3C]/30">
+                <span className="text-[11px] font-mono font-bold text-success bg-emerald-50 px-2 py-0.5 rounded border border-success/30">
                   STATUS: ACTIVE PERMIT
                 </span>
               </div>
-              <h2 className="font-serif font-bold text-2xl text-[#14213D]">{greeting}, Demo Tourist</h2>
-              <p className="text-xs text-slate-600 leading-relaxed">
+              <h2 className="font-serif font-bold text-2xl text-ink">{greeting}{tourist?.name ? `, ${tourist.name}` : ""}</h2>
+              <p className="text-xs text-ink-soft leading-relaxed">
                 {tourist?.did
                   ? <>Your Digital Tourist Identity Permit (<span className="font-mono">{tourist.did}</span>) is registered with district emergency services. Spatial geofence boundaries and automated risk scoring are active.</>
                   : <>No Digital Tourist ID has been issued for this session yet. Complete verification to activate emergency services registration.</>}
               </p>
             </div>
 
-            <div className="pt-3 mt-4 border-t border-[#D8D2C4] flex items-center justify-between text-xs text-slate-600 font-mono">
-              <span className="flex items-center gap-1.5 text-[#14213D] font-bold">
-                <MapPin className="w-4 h-4 text-[#14213D]" /> GPS TELEMETRY: {coords.lat.toFixed(4)}, {coords.lng.toFixed(4)}
+            <div className="pt-3 mt-4 border-t-2 border-line flex items-center justify-between text-xs text-ink-soft font-mono">
+              <span className="flex items-center gap-1.5 text-ink font-bold">
+                <MapPin className="w-4 h-4 text-ink" /> GPS TELEMETRY: {coords.lat.toFixed(4)}, {coords.lng.toFixed(4)}
               </span>
               <button
                 onClick={() => setLocationConsent(!locationConsent)}
                 className={`px-3 py-1 rounded font-bold text-[11px] transition border cursor-pointer ${
                   locationConsent
-                    ? 'bg-emerald-50 text-[#1B5E3C] border-[#1B5E3C]'
-                    : 'bg-slate-100 text-slate-600 border-slate-300'
+                    ? 'bg-emerald-50 text-success border-success'
+                    : 'bg-surface-2 text-ink-soft border-slate-300'
                 }`}
               >
-                TELEMETRY: {locationConsent ? 'LOGGING ACTIVE ✓' : 'SUSPENDED ✕'}
+                TELEMETRY: {locationConsent ? 'LOGGING ACTIVE' : 'SUSPENDED'}
               </button>
             </div>
           </div>
 
           {/* Restrained Plain Risk Score Readout */}
-          <div className="bg-white p-5 rounded-md border border-[#D8D2C4] flex flex-col justify-between text-center">
-            <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-500 block border-b border-[#D8D2C4] pb-2">
+          <div className="bg-surface p-5 rounded-nb border-2 border-line flex flex-col justify-between text-center">
+            <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-ink-soft block border-b-2 border-line pb-2">
               DYNAMIC RISK EVALUATION (FORM R-7)
             </span>
             <div className="my-3">
-              <span className="text-3xl font-mono font-bold text-[#14213D]">
-                {riskEval.totalScore} <span className="text-sm font-sans text-slate-500 font-normal">/ 100</span>
+              <span className="text-3xl font-mono font-bold text-ink">
+                {riskEval.totalScore} <span className="text-sm font-sans text-ink-soft font-normal">/ 100</span>
               </span>
               <div className="mt-2">
-                <span className="inline-block px-3 py-1 rounded text-xs font-mono font-bold uppercase tracking-wider border border-[#1B5E3C] text-[#1B5E3C] bg-emerald-50/50">
+                <span className="inline-block px-3 py-1 rounded text-xs font-mono font-bold uppercase tracking-wider border border-success text-success bg-emerald-50/50">
                   {riskEval.badgeText}
                 </span>
               </div>
             </div>
-            <p className="text-[11px] font-mono text-slate-500">
-              {gfCheck.isBreached ? '⚠️ HIGH RISK GEOFENCE BREACH DETECTED' : 'SAFE TRAVEL CORRIDOR • NO ACTIVE BREACH'}
+            <p className="text-[11px] font-mono text-ink-soft">
+              {gfCheck.isBreached ? 'HIGH RISK GEOFENCE BREACH DETECTED' : 'SAFE TRAVEL CORRIDOR • NO ACTIVE BREACH'}
             </p>
-            <p className="text-[10px] font-mono text-slate-400 mt-1">
-              SOURCE: {riskSource === 'ml' ? '🧠 ML SERVICE' : '📊 LOCAL ENGINE'}
+            <p className="text-[10px] font-mono text-ink-soft mt-1">
+              SOURCE: {riskSource === 'ml' ? 'ML SERVICE' : 'LOCAL ENGINE'}
             </p>
           </div>
         </div>
@@ -461,59 +412,59 @@ export default function CitizenPage() {
               setActiveModal('efir');
               if (!efirData) handleGenerateEfir();
             }}
-            className="bg-white p-4 rounded-md border border-[#D8D2C4] hover:border-[#14213D] transition flex flex-col items-center text-center gap-2 text-[#14213D] group cursor-pointer"
+            className="bg-surface p-4 rounded-nb border-2 border-line hover:border-line transition flex flex-col items-center text-center gap-2 text-ink group cursor-pointer"
           >
-            <div className="p-2.5 bg-[#F7F5F0] text-[#14213D] rounded border border-[#D8D2C4] group-hover:bg-[#14213D] group-hover:text-white transition">
+            <div className="p-2.5 bg-surface-2 text-ink rounded border-2 border-line group-hover:bg-accent group-hover:text-white transition">
               <FileText className="w-5 h-5" />
             </div>
-            <span className="text-xs font-serif font-bold text-[#14213D]">Automated E-FIR Draft</span>
-            <span className="text-[10px] font-mono text-slate-500">FORM E-154 COMPLAINT</span>
+            <span className="text-xs font-serif font-bold text-ink">Automated E-FIR Draft</span>
+            <span className="text-[10px] font-mono text-ink-soft">FORM E-154 COMPLAINT</span>
           </button>
 
           {/* AI Attire Profile Button */}
           <button
             onClick={() => setActiveModal('attire')}
-            className="bg-white p-4 rounded-md border border-[#D8D2C4] hover:border-[#14213D] transition flex flex-col items-center text-center gap-2 text-[#14213D] group cursor-pointer"
+            className="bg-surface p-4 rounded-nb border-2 border-line hover:border-line transition flex flex-col items-center text-center gap-2 text-ink group cursor-pointer"
           >
-            <div className="p-2.5 bg-[#F7F5F0] text-[#14213D] rounded border border-[#D8D2C4] group-hover:bg-[#14213D] group-hover:text-white transition">
+            <div className="p-2.5 bg-surface-2 text-ink rounded border-2 border-line group-hover:bg-accent group-hover:text-white transition">
               <Shirt className="w-5 h-5" />
             </div>
-            <span className="text-xs font-serif font-bold text-[#14213D]">Visual Attire Record</span>
-            <span className="text-[10px] font-mono text-slate-500">FORM V-09 SPECIFIERS</span>
+            <span className="text-xs font-serif font-bold text-ink">Visual Attire Record</span>
+            <span className="text-[10px] font-mono text-ink-soft">FORM V-09 SPECIFIERS</span>
           </button>
 
           {/* Voice Assistance Button */}
           <button
             onClick={() => setActiveModal('voice')}
-            className="bg-white p-4 rounded-md border border-[#D8D2C4] hover:border-[#14213D] transition flex flex-col items-center text-center gap-2 text-[#14213D] group cursor-pointer"
+            className="bg-surface p-4 rounded-nb border-2 border-line hover:border-line transition flex flex-col items-center text-center gap-2 text-ink group cursor-pointer"
           >
-            <div className="p-2.5 bg-[#F7F5F0] text-[#14213D] rounded border border-[#D8D2C4] group-hover:bg-[#14213D] group-hover:text-white transition">
+            <div className="p-2.5 bg-surface-2 text-ink rounded border-2 border-line group-hover:bg-accent group-hover:text-white transition">
               <Mic className="w-5 h-5" />
             </div>
-            <span className="text-xs font-serif font-bold text-[#14213D]">Sarvam Voice SOS</span>
-            <span className="text-[10px] font-mono text-slate-500">10+ INDIAN LANGUAGES</span>
+            <span className="text-xs font-serif font-bold text-ink">Sarvam Voice SOS</span>
+            <span className="text-[10px] font-mono text-ink-soft">10+ INDIAN LANGUAGES</span>
           </button>
 
           {/* Offline Maps Button */}
           <button
             onClick={() => setActiveModal('offline_map')}
-            className="bg-white p-4 rounded-md border border-[#D8D2C4] hover:border-[#14213D] transition flex flex-col items-center text-center gap-2 text-[#14213D] group cursor-pointer"
+            className="bg-surface p-4 rounded-nb border-2 border-line hover:border-line transition flex flex-col items-center text-center gap-2 text-ink group cursor-pointer"
           >
-            <div className="p-2.5 bg-[#F7F5F0] text-[#14213D] rounded border border-[#D8D2C4] group-hover:bg-[#14213D] group-hover:text-white transition">
+            <div className="p-2.5 bg-surface-2 text-ink rounded border-2 border-line group-hover:bg-accent group-hover:text-white transition">
               <Download className="w-5 h-5" />
             </div>
-            <span className="text-xs font-serif font-bold text-[#14213D]">Offline Vector Tiles</span>
-            <span className="text-[10px] font-mono text-slate-500">NO-NETWORK CACHE</span>
+            <span className="text-xs font-serif font-bold text-ink">Offline Vector Tiles</span>
+            <span className="text-[10px] font-mono text-ink-soft">NO-NETWORK CACHE</span>
           </button>
         </div>
 
         {/* 7. Plain Bordered Spatial Map Container */}
-        <div className="bg-white p-4 rounded-md border border-[#D8D2C4] space-y-3">
-          <div className="flex items-center justify-between border-b border-[#D8D2C4] pb-2">
-            <h3 className="font-serif font-bold text-[#14213D] text-sm flex items-center gap-2">
-              <Globe className="w-4 h-4 text-[#14213D]" /> District Spatial Safety Map & Official Polygon Bounds
+        <div className="bg-surface p-4 rounded-nb border-2 border-line space-y-3">
+          <div className="flex items-center justify-between border-b-2 border-line pb-2">
+            <h3 className="font-serif font-bold text-ink text-sm flex items-center gap-2">
+              <Globe className="w-4 h-4 text-ink" /> District Spatial Safety Map & Official Polygon Bounds
             </h3>
-            <span className="text-[11px] font-mono text-slate-500">OPENSTREETMAP VECTOR TILES</span>
+            <span className="text-[11px] font-mono text-ink-soft">OPENSTREETMAP VECTOR TILES</span>
           </div>
 
           <MapView
@@ -531,7 +482,7 @@ export default function CitizenPage() {
         </div>
 
         {/* 8. Official Notice Strip Helpline Footer */}
-        <footer className="bg-[#14213D] text-white p-4 rounded-md border border-[#14213D] flex flex-wrap items-center justify-between gap-3 text-xs font-mono">
+        <footer className="bg-accent text-accent-ink p-4 rounded-nb border-2 border-line flex flex-wrap items-center justify-between gap-3 text-xs font-mono">
           <div className="flex items-center gap-2">
             <PhoneCall className="w-4 h-4 text-amber-400" />
             <span>NATIONAL EMERGENCY HOTLINE: <strong className="text-white font-mono">112</strong></span>
@@ -547,57 +498,57 @@ export default function CitizenPage() {
 
       {/* MODAL 1: E-FIR Auto Generator */}
       {activeModal === 'efir' && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-lg rounded-md border border-[#D8D2C4] bg-white p-6 shadow-xl relative text-[#14213D] space-y-4">
+        <div className="fixed inset-0 z-50 bg-surface-2/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-lg rounded-nb border-2 border-line bg-surface p-6 shadow-nb relative text-ink space-y-4">
             <button
               onClick={() => setActiveModal('none')}
-              className="absolute top-4 right-4 text-slate-500 hover:text-[#14213D] p-1 bg-[#F7F5F0] rounded cursor-pointer border border-[#D8D2C4]"
+              className="absolute top-4 right-4 text-ink-soft hover:text-ink p-1 bg-surface-2 rounded cursor-pointer border-2 border-line"
             >
               <X className="w-5 h-5" />
             </button>
 
-            <div className="flex items-center gap-3 border-b border-[#D8D2C4] pb-3">
-              <div className="p-2.5 bg-[#14213D] text-white rounded">
+            <div className="flex items-center gap-3 border-b-2 border-line pb-3">
+              <div className="p-2.5 bg-accent text-accent-ink rounded">
                 <FileText className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="font-serif font-bold text-lg text-[#14213D]">Automated E-FIR Complaint Draft</h3>
-                <p className="text-xs text-slate-600 font-mono">Under Section 154 Code of Criminal Procedure (CrPC)</p>
+                <h3 className="font-serif font-bold text-lg text-ink">Automated E-FIR Complaint Draft</h3>
+                <p className="text-xs text-ink-soft font-mono">Under Section 154 Code of Criminal Procedure (CrPC)</p>
               </div>
             </div>
 
             {efirLoading ? (
-              <div className="py-10 flex flex-col items-center justify-center text-slate-600 text-xs gap-2 font-mono">
-                <RefreshCw className="w-6 h-6 animate-spin text-[#14213D]" />
+              <div className="py-10 flex flex-col items-center justify-center text-ink-soft text-xs gap-2 font-mono">
+                <RefreshCw className="w-6 h-6 animate-spin text-ink" />
                 <span>Compiling draft report from verified credentials...</span>
               </div>
             ) : efirData ? (
-              <div className="space-y-2.5 text-xs bg-[#F7F5F0] p-4 rounded border border-[#D8D2C4]">
-                <div className="flex justify-between border-b border-[#D8D2C4] pb-2 font-mono">
-                  <span className="text-slate-600">DRAFT E-FIR TICKET:</span>
-                  <span className="font-bold text-[#14213D]">{efirData.efirId}</span>
+              <div className="space-y-2.5 text-xs bg-surface-2 p-4 rounded border-2 border-line">
+                <div className="flex justify-between border-b-2 border-line pb-2 font-mono">
+                  <span className="text-ink-soft">DRAFT E-FIR TICKET:</span>
+                  <span className="font-bold text-ink">{efirData.efirId}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-600">Complainant Name:</span>
-                  <span className="font-bold text-[#14213D]">{efirData.touristName}</span>
+                  <span className="text-ink-soft">Complainant Name:</span>
+                  <span className="font-bold text-ink">{efirData.touristName}</span>
                 </div>
                 <div className="flex justify-between font-mono">
-                  <span className="text-slate-600">Verified ID Ref:</span>
-                  <span className="text-[#14213D]">{efirData.passportAadhaar}</span>
+                  <span className="text-ink-soft">Verified ID Ref:</span>
+                  <span className="text-ink">{efirData.passportAadhaar}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-600">Incident Category:</span>
+                  <span className="text-ink-soft">Incident Category:</span>
                   <span className="font-bold text-[#FF7722]">{efirData.incidentType}</span>
                 </div>
                 <div className="flex justify-between font-mono">
-                  <span className="text-slate-600">GPS Coordinates:</span>
-                  <span className="text-[#14213D]">{efirData.location?.lat?.toFixed(4)}, {efirData.location?.lng?.toFixed(4)}</span>
+                  <span className="text-ink-soft">GPS Coordinates:</span>
+                  <span className="text-ink">{efirData.location?.lat?.toFixed(4)}, {efirData.location?.lng?.toFixed(4)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-600">Visual Attire Record:</span>
-                  <span className="text-[#14213D]">{efirData.clothingProfile}</span>
+                  <span className="text-ink-soft">Visual Attire Record:</span>
+                  <span className="text-ink">{efirData.clothingProfile}</span>
                 </div>
-                <div className="flex justify-between border-t border-[#D8D2C4] pt-2 text-[#1B5E3C] font-bold font-mono">
+                <div className="flex justify-between border-t-2 border-line pt-2 text-success font-bold font-mono">
                   <span>OFFICER VERIFICATION:</span>
                   <span>{efirData.policeVerification}</span>
                 </div>
@@ -606,7 +557,7 @@ export default function CitizenPage() {
 
             <button
               onClick={() => setActiveModal('none')}
-              className="w-full py-2.5 bg-[#14213D] hover:bg-[#1C2D52] text-white font-bold text-xs rounded transition cursor-pointer font-mono"
+              className="w-full py-2.5 bg-accent hover:bg-accent-strong text-white font-bold text-xs rounded transition cursor-pointer font-mono"
             >
               SUBMIT E-FIR DRAFT TO DISTRICT POLICE CONTROL ROOM
             </button>
@@ -616,62 +567,62 @@ export default function CitizenPage() {
 
       {/* MODAL 2: AI Clothing Profile */}
       {activeModal === 'attire' && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-md border border-[#D8D2C4] bg-white p-6 shadow-xl relative text-[#14213D] space-y-4">
+        <div className="fixed inset-0 z-50 bg-surface-2/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-nb border-2 border-line bg-surface p-6 shadow-nb relative text-ink space-y-4">
             <button
               onClick={() => setActiveModal('none')}
-              className="absolute top-4 right-4 text-slate-500 hover:text-[#14213D] p-1 bg-[#F7F5F0] rounded cursor-pointer border border-[#D8D2C4]"
+              className="absolute top-4 right-4 text-ink-soft hover:text-ink p-1 bg-surface-2 rounded cursor-pointer border-2 border-line"
             >
               <X className="w-5 h-5" />
             </button>
 
-            <div className="flex items-center gap-3 border-b border-[#D8D2C4] pb-3">
-              <div className="p-2.5 bg-[#14213D] text-white rounded">
+            <div className="flex items-center gap-3 border-b-2 border-line pb-3">
+              <div className="p-2.5 bg-accent text-accent-ink rounded">
                 <Shirt className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="font-serif font-bold text-lg text-[#14213D]">Visual Attire & Description Record</h3>
-                <p className="text-xs text-slate-600 font-mono">Form V-09 • Search & Rescue Identification</p>
+                <h3 className="font-serif font-bold text-lg text-ink">Visual Attire & Description Record</h3>
+                <p className="text-xs text-ink-soft font-mono">Form V-09 • Search & Rescue Identification</p>
               </div>
             </div>
 
             {attireSaved ? (
-              <div className="py-8 text-center text-[#1B5E3C] font-bold text-xs flex items-center justify-center gap-2 font-mono">
+              <div className="py-8 text-center text-success font-bold text-xs flex items-center justify-center gap-2 font-mono">
                 <CheckCircle2 className="w-5 h-5" /> ATTIRE RECORD SAVED TO DISTRICT RECORD!
               </div>
             ) : (
               <form onSubmit={handleSaveAttire} className="space-y-3 text-xs">
                 <div>
-                  <label className="block text-slate-600 mb-1 font-mono font-bold">TOP WEAR (JACKET/SHIRT)</label>
+                  <label className="block text-ink-soft mb-1 font-mono font-bold">TOP WEAR (JACKET/SHIRT)</label>
                   <input
                     type="text"
                     value={attireForm.top}
                     onChange={(e) => setAttireForm({ ...attireForm, top: e.target.value })}
-                    className="w-full bg-[#F7F5F0] border border-[#D8D2C4] rounded p-2.5 text-[#14213D] focus:outline-none focus:border-[#14213D]"
+                    className="w-full bg-surface-2 border-2 border-line rounded p-2.5 text-ink focus:outline-none focus:border-line"
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-600 mb-1 font-mono font-bold">BOTTOM WEAR (PANTS/JEANS)</label>
+                  <label className="block text-ink-soft mb-1 font-mono font-bold">BOTTOM WEAR (PANTS/JEANS)</label>
                   <input
                     type="text"
                     value={attireForm.bottom}
                     onChange={(e) => setAttireForm({ ...attireForm, bottom: e.target.value })}
-                    className="w-full bg-[#F7F5F0] border border-[#D8D2C4] rounded p-2.5 text-[#14213D] focus:outline-none focus:border-[#14213D]"
+                    className="w-full bg-surface-2 border-2 border-line rounded p-2.5 text-ink focus:outline-none focus:border-line"
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-600 mb-1 font-mono font-bold">FOOTWEAR & ACCESSORIES</label>
+                  <label className="block text-ink-soft mb-1 font-mono font-bold">FOOTWEAR & ACCESSORIES</label>
                   <input
                     type="text"
                     value={attireForm.accessories}
                     onChange={(e) => setAttireForm({ ...attireForm, accessories: e.target.value })}
-                    className="w-full bg-[#F7F5F0] border border-[#D8D2C4] rounded p-2.5 text-[#14213D] focus:outline-none focus:border-[#14213D]"
+                    className="w-full bg-surface-2 border-2 border-line rounded p-2.5 text-ink focus:outline-none focus:border-line"
                   />
                 </div>
 
                 <button
                   type="submit"
-                  className="w-full py-2.5 bg-[#14213D] hover:bg-[#1C2D52] text-white font-bold rounded transition cursor-pointer font-mono mt-2"
+                  className="w-full py-2.5 bg-accent hover:bg-accent-strong text-white font-bold rounded transition cursor-pointer font-mono mt-2"
                 >
                   SAVE ATTIRE RECORD TO PERMIT TICKET
                 </button>
@@ -683,32 +634,32 @@ export default function CitizenPage() {
 
       {/* MODAL 3: Sarvam AI Multilingual Voice */}
       {activeModal === 'voice' && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-md border border-[#D8D2C4] bg-white p-6 shadow-xl relative text-[#14213D] space-y-4">
+        <div className="fixed inset-0 z-50 bg-surface-2/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-nb border-2 border-line bg-surface p-6 shadow-nb relative text-ink space-y-4">
             <button
               onClick={() => setActiveModal('none')}
-              className="absolute top-4 right-4 text-slate-500 hover:text-[#14213D] p-1 bg-[#F7F5F0] rounded cursor-pointer border border-[#D8D2C4]"
+              className="absolute top-4 right-4 text-ink-soft hover:text-ink p-1 bg-surface-2 rounded cursor-pointer border-2 border-line"
             >
               <X className="w-5 h-5" />
             </button>
 
-            <div className="flex items-center gap-3 border-b border-[#D8D2C4] pb-3">
-              <div className="p-2.5 bg-[#14213D] text-white rounded">
+            <div className="flex items-center gap-3 border-b-2 border-line pb-3">
+              <div className="p-2.5 bg-accent text-accent-ink rounded">
                 <Mic className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="font-serif font-bold text-lg text-[#14213D]">Sarvam AI Multilingual Voice SOS</h3>
-                <p className="text-xs text-slate-600 font-mono">Bhashini AI Speech Recognition System</p>
+                <h3 className="font-serif font-bold text-lg text-ink">Sarvam AI Multilingual Voice SOS</h3>
+                <p className="text-xs text-ink-soft font-mono">Bhashini AI Speech Recognition System</p>
               </div>
             </div>
 
             <div className="space-y-3 text-xs">
               <div>
-                <label className="block text-slate-600 mb-1 font-mono font-bold">SELECT REGIONAL LANGUAGE</label>
+                <label className="block text-ink-soft mb-1 font-mono font-bold">SELECT REGIONAL LANGUAGE</label>
                 <select
                   value={selectedLang}
                   onChange={(e) => setSelectedLang(e.target.value)}
-                  className="w-full bg-[#F7F5F0] border border-[#D8D2C4] rounded p-2.5 text-[#14213D] font-medium"
+                  className="w-full bg-surface-2 border-2 border-line rounded p-2.5 text-ink font-medium"
                 >
                   <option>Hindi (हिंदी)</option>
                   <option>Marathi (मराठी)</option>
@@ -721,22 +672,22 @@ export default function CitizenPage() {
                 </select>
               </div>
 
-              <div className="bg-[#F7F5F0] p-4 rounded border border-[#D8D2C4] text-center space-y-3">
+              <div className="bg-surface-2 p-4 rounded border-2 border-line text-center space-y-3">
                 <button
                   onClick={listening ? handleStopVoice : handleStartVoice}
                   className={`w-16 h-16 rounded-full mx-auto flex items-center justify-center transition border cursor-pointer ${
-                    listening ? 'bg-[#FF7722] text-white border-amber-600 animate-pulse' : 'bg-[#14213D] text-white hover:bg-[#1C2D52]'
+                    listening ? 'bg-[#FF7722] text-white border-amber-600 animate-pulse' : 'bg-accent text-accent-ink hover:bg-accent-strong'
                   }`}
                 >
                   <Mic className="w-6 h-6" />
                 </button>
-                <p className="text-xs text-slate-600 font-mono">
-                  {listening ? '🔴 RECORDING — tap again to stop' : (voiceText || 'Tap microphone to dictate emergency message...')}
+                <p className="text-xs text-ink-soft font-mono">
+                  {listening ? 'RECORDING — tap again to stop' : (voiceText || 'Tap microphone to dictate emergency message...')}
                 </p>
                 {voiceText && !listening && (
-                  <div className="bg-white p-3 rounded border border-[#D8D2C4] text-left">
-                    <span className="text-[10px] font-mono text-slate-500 uppercase block font-bold mb-1">TRANSCRIBED TEXT</span>
-                    <p className="text-sm text-[#14213D] font-medium">{voiceText}</p>
+                  <div className="bg-surface p-3 rounded border-2 border-line text-left">
+                    <span className="text-[10px] font-mono text-ink-soft uppercase block font-bold mb-1">TRANSCRIBED TEXT</span>
+                    <p className="text-sm text-ink font-medium">{voiceText}</p>
                   </div>
                 )}
                 {voiceError && (
@@ -753,34 +704,34 @@ export default function CitizenPage() {
 
       {/* MODAL 4: Offline Map */}
       {activeModal === 'offline_map' && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-md border border-[#D8D2C4] bg-white p-6 shadow-xl relative text-[#14213D] space-y-4">
+        <div className="fixed inset-0 z-50 bg-surface-2/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-nb border-2 border-line bg-surface p-6 shadow-nb relative text-ink space-y-4">
             <button
               onClick={() => setActiveModal('none')}
-              className="absolute top-4 right-4 text-slate-500 hover:text-[#14213D] p-1 bg-[#F7F5F0] rounded cursor-pointer border border-[#D8D2C4]"
+              className="absolute top-4 right-4 text-ink-soft hover:text-ink p-1 bg-surface-2 rounded cursor-pointer border-2 border-line"
             >
               <X className="w-5 h-5" />
             </button>
 
-            <div className="flex items-center gap-3 border-b border-[#D8D2C4] pb-3">
-              <div className="p-2.5 bg-[#14213D] text-white rounded">
+            <div className="flex items-center gap-3 border-b-2 border-line pb-3">
+              <div className="p-2.5 bg-accent text-accent-ink rounded">
                 <Download className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="font-serif font-bold text-lg text-[#14213D]">Offline Vector Map Tiles</h3>
-                <p className="text-xs text-slate-600 font-mono">No-Network Emergency Region Cache</p>
+                <h3 className="font-serif font-bold text-lg text-ink">Offline Vector Map Tiles</h3>
+                <p className="text-xs text-ink-soft font-mono">No-Network Emergency Region Cache</p>
               </div>
             </div>
 
             <div className="space-y-3 text-xs">
-              <div className="bg-[#F7F5F0] p-3 rounded border border-[#D8D2C4] flex items-center justify-between">
+              <div className="bg-surface-2 p-3 rounded border-2 border-line flex items-center justify-between">
                 <div>
-                  <span className="font-serif font-bold text-[#14213D] block">Pink City & Fort Ridge Region</span>
-                  <span className="text-slate-500 font-mono text-[11px]">Size: 24.5 MB • Includes Patrol Nodes</span>
+                  <span className="font-serif font-bold text-ink block">Pink City & Fort Ridge Region</span>
+                  <span className="text-ink-soft font-mono text-[11px]">Size: 24.5 MB • Includes Patrol Nodes</span>
                 </div>
                 <button
                   onClick={() => alert('Downloaded Pink City Offline Map Pack to LocalCache!')}
-                  className="px-3 py-1.5 bg-[#14213D] hover:bg-[#1C2D52] text-white font-bold rounded transition font-mono"
+                  className="px-3 py-1.5 bg-accent hover:bg-accent-strong text-white font-bold rounded transition font-mono"
                 >
                   DOWNLOAD
                 </button>

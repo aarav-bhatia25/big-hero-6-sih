@@ -30,6 +30,7 @@ import MapView from '@/components/maps/MapView';
 import IncidentQueue from '@/components/authority/IncidentQueue';
 import IncidentDetailModal from '@/components/authority/IncidentDetailModal';
 import { getSocket } from '@/lib/socket';
+import ThemeToggle from '@/components/ui/ThemeToggle';
 
 export default function AdminPage() {
   const [currentUser, setCurrentUser] = useState<any | null>(null);
@@ -275,7 +276,7 @@ export default function AdminPage() {
       );
       setSelectedIncident(null);
       alert(
-        `🚨 Dispatch confirmed for ${incidentId}` +
+        `Dispatch confirmed for ${incidentId}` +
           (unit ? ` — ${unit.unitId} (${unit.name}) notified.` : '. No responder unit on record.')
       );
     } catch (err) {
@@ -312,53 +313,46 @@ export default function AdminPage() {
   };
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100 p-4 md:p-8 max-w-7xl mx-auto space-y-6">
+    <main className="min-h-screen bg-bg text-ink p-4 md:p-8 max-w-7xl mx-auto space-y-6">
       {/* Top Header */}
-      <header className="flex items-center justify-between border-b border-slate-800 pb-4">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-red-500/10 text-red-500 rounded-xl border border-red-500/20">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b-2 border-line pb-4">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="p-2.5 bg-accent text-accent-ink rounded-nb border-2 border-line shrink-0">
             <ShieldAlert className="w-6 h-6" />
           </div>
-          <div>
-            <h1 className="text-2xl font-black text-slate-100 flex items-center gap-2 tracking-tight">
-              AUTHORITY COMMAND CENTER <span className="text-xs px-2.5 py-0.5 rounded-full bg-red-500/20 text-red-400 font-mono">ADMIN VIEW</span>
-            </h1>
-            <p className="text-xs text-slate-400 font-mono">
-              District Incident Dispatch • Dynamic Geofences • Sepolia Blockchain Audit Log
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="text-xl md:text-2xl font-black text-ink tracking-tight leading-none">
+                Authority Command Center
+              </h1>
+              <span className="nb-chip nb-chip-accent">ADMIN VIEW</span>
+            </div>
+            <p className="text-xs text-ink-soft mt-1">
+              District Incident Dispatch • Dynamic Geofences • Blockchain Audit Log
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           {currentUser && (
-            <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-xs font-mono">
-              <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-              <span className="text-slate-300 font-bold">{currentUser.name}</span>
-              <span className="px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-bold text-[10px] uppercase">
-                {currentUser.role}
-              </span>
+            <div className="hidden lg:flex items-center gap-2 nb-chip normal-case tracking-normal">
+              <User className="w-3.5 h-3.5 text-accent" />
+              <span className="font-bold">{currentUser.name}</span>
+              <span className="text-accent-strong font-black">· {currentUser.role}</span>
             </div>
           )}
 
-          <button
-            onClick={() => setShowGeofenceModal(true)}
-            className="flex items-center gap-1.5 px-3 py-2 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-bold transition shadow-lg shadow-red-600/20 cursor-pointer"
-          >
-            <Plus className="w-4 h-4" /> Add Geofence Zone
+          <button onClick={() => setShowGeofenceModal(true)} className="nb-btn nb-btn-danger text-xs">
+            <Plus className="w-4 h-4" /> <span className="hidden md:inline">Add Geofence</span>
           </button>
 
-          <button
-            onClick={fetchDashboardData}
-            className="flex items-center gap-2 px-3 py-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-xl text-xs font-bold text-slate-300 transition cursor-pointer"
-          >
-            <RefreshCw className={`w-4 h-4 text-emerald-400 ${loading ? 'animate-spin' : ''}`} /> Refresh
+          <button onClick={fetchDashboardData} className="nb-btn nb-btn-ghost !border-2 text-xs">
+            <RefreshCw className={`w-4 h-4 text-success ${loading ? 'animate-spin' : ''}`} />
+            <span className="hidden md:inline">Refresh</span>
           </button>
 
-          <Link
-            href="/citizen"
-            className="flex items-center gap-1.5 px-3 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 rounded-xl text-xs font-bold transition cursor-pointer"
-          >
-            Citizen View →
+          <Link href="/citizen" className="nb-btn text-xs" style={{ background: '#15a34a', color: '#fff' }}>
+            <span className="hidden sm:inline">Citizen View</span> →
           </Link>
 
           <button
@@ -367,52 +361,54 @@ export default function AdminPage() {
               window.location.href = '/login';
             }}
             title="Logout"
-            className="p-2 bg-slate-900 hover:bg-red-950/60 border border-slate-800 hover:border-red-500/40 text-slate-400 hover:text-red-400 rounded-xl transition cursor-pointer"
+            className="nb-btn nb-btn-ghost !border-2 h-9 w-9 !px-0"
           >
             <LogOut className="w-4 h-4" />
           </button>
+
+          <ThemeToggle />
         </div>
       </header>
 
       {/* Summary Metrics Bar */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="glass-panel p-4 rounded-2xl border border-slate-800 bg-slate-900/80 flex items-center gap-4">
-          <div className="p-3 bg-emerald-500/10 text-emerald-400 rounded-xl border border-emerald-500/20">
+        <div className="nb-card p-4 rounded-nb border-2 border-line bg-surface/80 flex items-center gap-4">
+          <div className="p-3 bg-emerald-500/10 text-success rounded-nb border border-emerald-500/20">
             <Users className="w-6 h-6" />
           </div>
           <div>
-            <span className="text-xs text-slate-400 uppercase font-semibold block">Active Tourists</span>
-            <span className="text-2xl font-black font-mono text-slate-100">{stats ? stats.activeTourists : '—'}</span>
+            <span className="text-xs text-ink-soft uppercase font-semibold block">Active Tourists</span>
+            <span className="text-2xl font-black font-mono text-ink">{stats ? stats.activeTourists : '—'}</span>
           </div>
         </div>
 
-        <div className="glass-panel p-4 rounded-2xl border border-red-500/30 bg-slate-900/80 flex items-center gap-4">
-          <div className="p-3 bg-red-500/10 text-red-400 rounded-xl border border-red-500/20">
+        <div className="nb-card p-4 rounded-nb border border-red-500/30 bg-surface/80 flex items-center gap-4">
+          <div className="p-3 bg-red-500/10 text-danger rounded-nb border border-red-500/20">
             <ShieldAlert className="w-6 h-6 animate-pulse" />
           </div>
           <div>
-            <span className="text-xs text-slate-400 uppercase font-semibold block">Live Incidents</span>
-            <span className="text-2xl font-black font-mono text-red-400">{stats ? stats.liveIncidents : incidents.length}</span>
+            <span className="text-xs text-ink-soft uppercase font-semibold block">Live Incidents</span>
+            <span className="text-2xl font-black font-mono text-danger">{stats ? stats.liveIncidents : incidents.length}</span>
           </div>
         </div>
 
-        <div className="glass-panel p-4 rounded-2xl border border-amber-500/30 bg-slate-900/80 flex items-center gap-4">
-          <div className="p-3 bg-amber-500/10 text-amber-400 rounded-xl border border-amber-500/20">
+        <div className="nb-card p-4 rounded-nb border border-amber-500/30 bg-surface/80 flex items-center gap-4">
+          <div className="p-3 bg-amber-500/10 text-warning rounded-nb border border-amber-500/20">
             <AlertTriangle className="w-6 h-6" />
           </div>
           <div>
-            <span className="text-xs text-slate-400 uppercase font-semibold block">High Risk Zones</span>
-            <span className="text-2xl font-black font-mono text-amber-400">{stats ? stats.highRiskZones : '—'}</span>
+            <span className="text-xs text-ink-soft uppercase font-semibold block">High Risk Zones</span>
+            <span className="text-2xl font-black font-mono text-warning">{stats ? stats.highRiskZones : '—'}</span>
           </div>
         </div>
 
-        <div className="glass-panel p-4 rounded-2xl border border-blue-500/30 bg-slate-900/80 flex items-center gap-4">
-          <div className="p-3 bg-blue-500/10 text-blue-400 rounded-xl border border-blue-500/20">
+        <div className="nb-card p-4 rounded-nb border border-blue-500/30 bg-surface/80 flex items-center gap-4">
+          <div className="p-3 bg-blue-500/10 text-accent rounded-nb border border-blue-500/20">
             <Radio className="w-6 h-6" />
           </div>
           <div>
-            <span className="text-xs text-slate-400 uppercase font-semibold block">Responders</span>
-            <span className="text-2xl font-black font-mono text-blue-400">
+            <span className="text-xs text-ink-soft uppercase font-semibold block">Responders</span>
+            <span className="text-2xl font-black font-mono text-accent">
               {stats ? `${stats.respondersAvailable}/${stats.respondersTotal} AVAILABLE` : '—'}
             </span>
           </div>
@@ -422,17 +418,17 @@ export default function AdminPage() {
       {/* Main Split Grid: Spatial Map & Incident Queue */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left 2 Columns: Live Spatial Map */}
-        <div className="lg:col-span-2 glass-panel rounded-2xl p-4 border border-slate-800 bg-slate-900/80 space-y-3">
+        <div className="lg:col-span-2 nb-card rounded-nb p-4 border-2 border-line bg-surface/80 space-y-3">
           <div className="flex items-center justify-between px-1">
-            <h3 className="font-bold text-slate-200 text-sm flex items-center gap-2">
-              <Radio className="w-4 h-4 text-emerald-400 animate-pulse" /> Live Incident & Responder Spatial Clusters
+            <h3 className="font-bold text-ink text-sm flex items-center gap-2">
+              <Radio className="w-4 h-4 text-success animate-pulse" /> Live Incident & Responder Spatial Clusters
             </h3>
             <span className={`text-xs font-mono px-2 py-0.5 rounded border ${
               socketConnected
-                ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
-                : 'text-red-400 bg-red-500/10 border-red-500/20'
+                ? 'text-success bg-emerald-500/10 border-emerald-500/20'
+                : 'text-danger bg-red-500/10 border-red-500/20'
             }`}>
-              {socketConnected ? '● Gateway Connected' : '○ Gateway Disconnected'}
+              {socketConnected ? 'Gateway Connected' : 'Gateway Disconnected'}
             </span>
           </div>
 
@@ -466,50 +462,50 @@ export default function AdminPage() {
 
       {/* Missing Tourist Investigation Mode Drawer — Live Data (#23) */}
       {investigationMode && (
-        <div className="glass-panel p-6 rounded-2xl border border-blue-500/30 bg-slate-900/90 shadow-2xl space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div className="nb-card p-6 rounded-nb border border-blue-500/30 bg-surface/90 shadow-nb space-y-4">
+          <div className="flex items-center justify-between border-b-2 border-line pb-3">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-blue-500/20 text-blue-400 rounded-xl border border-blue-500/30">
+              <div className="p-2 bg-blue-500/20 text-accent rounded-nb border border-blue-500/30">
                 <Search className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="font-bold text-slate-100 text-base">
+                <h3 className="font-bold text-ink text-base">
                   MISSING TOURIST INVESTIGATION MODE — Ticket {investigationMode.incidentId}
                 </h3>
-                <p className="text-xs text-slate-400 font-mono">Consented Emergency Access • Verified Identity Credentials</p>
+                <p className="text-xs text-ink-soft font-mono">Consented Emergency Access • Verified Identity Credentials</p>
               </div>
             </div>
             <button
               onClick={() => setInvestigationMode(null)}
-              className="text-slate-400 hover:text-white p-1 bg-slate-800 rounded-lg cursor-pointer"
+              className="text-ink-soft hover:text-white p-1 bg-surface-2 rounded-nb cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
 
           {investigationData.loading ? (
-            <div className="py-8 flex items-center justify-center text-slate-400">
+            <div className="py-8 flex items-center justify-center text-ink-soft">
               <RefreshCw className="w-5 h-5 animate-spin mr-2" /> Loading investigation data...
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
               {/* Identity & DID — real data */}
-              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
-                <span className="font-bold text-blue-400 block uppercase tracking-wider">🧪 Identity Profile</span>
-                <div><span className="text-slate-500">Tourist ID:</span> <strong className="text-slate-200 font-mono">{investigationMode.touristId}</strong></div>
-                <div><span className="text-slate-500">Name:</span> <strong className="text-slate-200">{investigationData.tourist?.name || investigationMode.touristName || 'Unknown'}</strong></div>
-                <div><span className="text-slate-500">W3C Credential DID:</span> <span className="font-mono text-emerald-400 block text-[11px]">{investigationData.tourist?.did || 'No DID issued'}</span></div>
-                <div><span className="text-slate-500">Identity Status:</span> <span className={`font-mono font-bold text-[11px] ${investigationData.tourist?.identityStatus === 'verified' ? 'text-emerald-400' : 'text-amber-400'}`}>{(investigationData.tourist?.identityStatus || 'unknown').toUpperCase()}</span></div>
-                <div><span className="text-slate-500">Nationality:</span> <span className="text-slate-200">{investigationData.tourist?.nationality || 'N/A'}</span></div>
+              <div className="bg-surface-2 p-4 rounded-nb border-2 border-line space-y-2">
+                <span className="font-bold text-accent block uppercase tracking-wider">Identity Profile</span>
+                <div><span className="text-ink-soft">Tourist ID:</span> <strong className="text-ink font-mono">{investigationMode.touristId}</strong></div>
+                <div><span className="text-ink-soft">Name:</span> <strong className="text-ink">{investigationData.tourist?.name || investigationMode.touristName || 'Unknown'}</strong></div>
+                <div><span className="text-ink-soft">W3C Credential DID:</span> <span className="font-mono text-success block text-[11px]">{investigationData.tourist?.did || 'No DID issued'}</span></div>
+                <div><span className="text-ink-soft">Identity Status:</span> <span className={`font-mono font-bold text-[11px] ${investigationData.tourist?.identityStatus === 'verified' ? 'text-success' : 'text-warning'}`}>{(investigationData.tourist?.identityStatus || 'unknown').toUpperCase()}</span></div>
+                <div><span className="text-ink-soft">Nationality:</span> <span className="text-ink">{investigationData.tourist?.nationality || 'N/A'}</span></div>
               </div>
 
               {/* AI Visual Clothing Profile — real data */}
-              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
-                <span className="font-bold text-purple-400 flex items-center gap-1 uppercase tracking-wider">
+              <div className="bg-surface-2 p-4 rounded-nb border-2 border-line space-y-2">
+                <span className="font-bold text-accent flex items-center gap-1 uppercase tracking-wider">
                   <Shirt className="w-4 h-4" /> AI Attire Description
                 </span>
                 {investigationData.tourist?.clothingProfile ? (
-                  <p className="text-slate-300 font-mono text-[11px] leading-relaxed whitespace-pre-line">
+                  <p className="text-ink-soft font-mono text-[11px] leading-relaxed whitespace-pre-line">
                     {typeof investigationData.tourist.clothingProfile === 'object'
                       ? Object.entries(investigationData.tourist.clothingProfile)
                           .map(([k, v]) => `${k}: ${v}`)
@@ -517,33 +513,33 @@ export default function AdminPage() {
                       : String(investigationData.tourist.clothingProfile)}
                   </p>
                 ) : (
-                  <p className="text-slate-500 italic text-[11px]">No attire record on file</p>
+                  <p className="text-ink-soft italic text-[11px]">No attire record on file</p>
                 )}
               </div>
 
               {/* Movement History — real data */}
-              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
-                <span className="font-bold text-emerald-400 flex items-center gap-1 uppercase tracking-wider">
+              <div className="bg-surface-2 p-4 rounded-nb border-2 border-line space-y-2">
+                <span className="font-bold text-success flex items-center gap-1 uppercase tracking-wider">
                   <MapPin className="w-4 h-4" /> Movement History
                 </span>
                 {investigationData.locations.length > 0 ? (
-                  <div className="text-[11px] font-mono text-slate-400 space-y-1 max-h-32 overflow-y-auto">
+                  <div className="text-[11px] font-mono text-ink-soft space-y-1 max-h-32 overflow-y-auto">
                     {investigationData.locations.slice(0, 10).map((loc: any, i: number) => (
                       <div key={i} className="flex justify-between">
-                        <span className="text-slate-200">
+                        <span className="text-ink">
                           {loc.coordinates?.lat?.toFixed(4) ?? loc.lat?.toFixed(4)}, {loc.coordinates?.lng?.toFixed(4) ?? loc.lng?.toFixed(4)}
                         </span>
-                        <span className="text-slate-500">
+                        <span className="text-ink-soft">
                           {loc.timestamp ? new Date(loc.timestamp).toLocaleTimeString() : ''}
                         </span>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <p className="text-slate-500 italic text-[11px]">No location history available</p>
+                  <p className="text-ink-soft italic text-[11px]">No location history available</p>
                 )}
                 {investigationData.locations.length > 0 && (
-                  <div className="text-[10px] text-slate-500 pt-1 border-t border-slate-800">
+                  <div className="text-[10px] text-ink-soft pt-1 border-t-2 border-line">
                     Showing {Math.min(10, investigationData.locations.length)} of {investigationData.locations.length} pings
                   </div>
                 )}
@@ -554,21 +550,21 @@ export default function AdminPage() {
       )}
 
       {/* E-FIR Officer Review Panel (#25) */}
-      <div className="glass-panel p-5 rounded-2xl border border-slate-800 bg-slate-900/80 space-y-4">
-        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-          <h3 className="font-bold text-slate-200 text-sm flex items-center gap-2">
-            <FileText className="w-4 h-4 text-amber-400" /> E-FIR Officer Verification Queue
+      <div className="nb-card p-5 rounded-nb border-2 border-line bg-surface/80 space-y-4">
+        <div className="flex items-center justify-between border-b-2 border-line pb-3">
+          <h3 className="font-bold text-ink text-sm flex items-center gap-2">
+            <FileText className="w-4 h-4 text-warning" /> E-FIR Officer Verification Queue
           </h3>
           <button
             onClick={fetchEfirs}
-            className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs text-slate-300 font-mono cursor-pointer"
+            className="flex items-center gap-1.5 px-2.5 py-1 bg-surface-2 hover:bg-surface-2 rounded-nb text-xs text-ink-soft font-mono cursor-pointer"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${efirLoading ? 'animate-spin' : ''}`} /> Refresh
           </button>
         </div>
 
         {efirs.length === 0 ? (
-          <div className="py-6 text-center text-slate-500 text-sm">
+          <div className="py-6 text-center text-ink-soft text-sm">
             No E-FIR drafts pending review.
           </div>
         ) : (
@@ -582,7 +578,7 @@ export default function AdminPage() {
               return (
                 <div
                   key={efir.efirId}
-                  className={`p-4 rounded-xl border text-xs ${
+                  className={`p-4 rounded-nb border text-xs ${
                     isPending
                       ? 'bg-amber-950/30 border-amber-500/30'
                       : isVerified
@@ -592,44 +588,44 @@ export default function AdminPage() {
                 >
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
-                      <span className="font-bold font-mono text-slate-200">{efir.efirId}</span>
-                      <span className="text-slate-400">•</span>
-                      <span className="text-slate-400 font-mono">{incidentId}</span>
+                      <span className="font-bold font-mono text-ink">{efir.efirId}</span>
+                      <span className="text-ink-soft">•</span>
+                      <span className="text-ink-soft font-mono">{incidentId}</span>
                     </div>
                     <span className={`px-2 py-0.5 rounded font-bold font-mono text-[11px] ${
-                      isPending ? 'bg-amber-500/20 text-amber-400' :
-                      isVerified ? 'bg-emerald-500/20 text-emerald-400' :
-                      'bg-red-500/20 text-red-400'
+                      isPending ? 'bg-amber-500/20 text-warning' :
+                      isVerified ? 'bg-emerald-500/20 text-success' :
+                      'bg-red-500/20 text-danger'
                     }`}>
-                      {isPending ? '⏳ PENDING' : isVerified ? '✅ VERIFIED' : '❌ REJECTED'}
+                      {isPending ? 'PENDING' : isVerified ? 'VERIFIED' : 'REJECTED'}
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2 text-slate-400 mb-3">
-                    <div>Complainant: <strong className="text-slate-200">{efir.touristName}</strong></div>
-                    <div>Incident: <strong className="text-slate-200">{efir.incidentType}</strong></div>
-                    <div>Location: <span className="text-slate-300 font-mono">{efir.location?.lat?.toFixed(4)}, {efir.location?.lng?.toFixed(4)}</span></div>
-                    <div>Filed: <span className="text-slate-300">{efir.createdAt ? new Date(efir.createdAt).toLocaleString() : 'N/A'}</span></div>
+                  <div className="grid grid-cols-2 gap-2 text-ink-soft mb-3">
+                    <div>Complainant: <strong className="text-ink">{efir.touristName}</strong></div>
+                    <div>Incident: <strong className="text-ink">{efir.incidentType}</strong></div>
+                    <div>Location: <span className="text-ink-soft font-mono">{efir.location?.lat?.toFixed(4)}, {efir.location?.lng?.toFixed(4)}</span></div>
+                    <div>Filed: <span className="text-ink-soft">{efir.createdAt ? new Date(efir.createdAt).toLocaleString() : 'N/A'}</span></div>
                   </div>
 
                   {efir.verifiedBy && (
-                    <div className="text-[11px] text-slate-500 mb-2 font-mono">
+                    <div className="text-[11px] text-ink-soft mb-2 font-mono">
                       {isVerified ? 'Approved' : 'Rejected'} by: {efir.verifiedBy} at {efir.verifiedAt ? new Date(efir.verifiedAt).toLocaleString() : ''}
-                      {efir.remarks && <span className="block text-slate-400 mt-0.5">Remarks: {efir.remarks}</span>}
+                      {efir.remarks && <span className="block text-ink-soft mt-0.5">Remarks: {efir.remarks}</span>}
                     </div>
                   )}
 
                   {isPending && (
-                    <div className="flex items-center gap-2 pt-2 border-t border-slate-800">
+                    <div className="flex items-center gap-2 pt-2 border-t-2 border-line">
                       <button
                         onClick={() => handleEfirAction(incidentId, 'APPROVE')}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg transition cursor-pointer"
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-nb transition cursor-pointer"
                       >
                         <CheckCircle2 className="w-3.5 h-3.5" /> APPROVE
                       </button>
                       <button
                         onClick={() => handleEfirAction(incidentId, 'REJECT')}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white font-bold rounded-lg transition cursor-pointer"
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white font-bold rounded-nb transition cursor-pointer"
                       >
                         <Ban className="w-3.5 h-3.5" /> REJECT
                       </button>
@@ -653,42 +649,42 @@ export default function AdminPage() {
 
       {/* Geofence Zone Creator Modal */}
       {showGeofenceModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-2xl border border-red-500/40 bg-slate-900 p-6 shadow-2xl relative text-slate-100 space-y-4">
+        <div className="fixed inset-0 z-50 bg-surface-2/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-nb border border-red-500/40 bg-surface p-6 shadow-nb relative text-ink space-y-4">
             <button
               onClick={() => setShowGeofenceModal(false)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 bg-slate-800 rounded-lg cursor-pointer"
+              className="absolute top-4 right-4 text-ink-soft hover:text-white p-1 bg-surface-2 rounded-nb cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
 
-            <div className="flex items-center gap-3 border-b border-slate-800 pb-3">
-              <div className="p-2.5 bg-red-500/20 text-red-400 rounded-xl border border-red-500/30">
+            <div className="flex items-center gap-3 border-b-2 border-line pb-3">
+              <div className="p-2.5 bg-red-500/20 text-danger rounded-nb border border-red-500/30">
                 <Layers className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="font-bold text-lg text-slate-100">Publish Government Geofence</h3>
-                <p className="text-xs text-slate-400">Add active danger zone polygon to Supabase & On-Chain</p>
+                <h3 className="font-bold text-lg text-ink">Publish Government Geofence</h3>
+                <p className="text-xs text-ink-soft">Add active danger zone polygon to Supabase & On-Chain</p>
               </div>
             </div>
 
             <form onSubmit={handleCreateGeofence} className="space-y-3 text-xs">
               <div>
-                <label className="block text-slate-400 mb-1">Geofence Zone Title</label>
+                <label className="block text-ink-soft mb-1">Geofence Zone Title</label>
                 <input
                   type="text"
                   value={newGf.name}
                   onChange={(e) => setNewGf({ ...newGf, name: e.target.value })}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100 focus:outline-none focus:border-red-500"
+                  className="w-full bg-surface-2 border-2 border-line rounded-nb p-2.5 text-ink focus:outline-none focus:border-red-500"
                 />
               </div>
 
               <div>
-                <label className="block text-slate-400 mb-1">Classification Type</label>
+                <label className="block text-ink-soft mb-1">Classification Type</label>
                 <select
                   value={newGf.type}
                   onChange={(e) => setNewGf({ ...newGf, type: e.target.value })}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100"
+                  className="w-full bg-surface-2 border-2 border-line rounded-nb p-2.5 text-ink"
                 >
                   <option value="high_risk">High Risk Zone</option>
                   <option value="restricted">Restricted Access Area</option>
@@ -698,11 +694,11 @@ export default function AdminPage() {
               </div>
 
               <div>
-                <label className="block text-slate-400 mb-1">Severity Level</label>
+                <label className="block text-ink-soft mb-1">Severity Level</label>
                 <select
                   value={newGf.severity}
                   onChange={(e) => setNewGf({ ...newGf, severity: e.target.value })}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-100"
+                  className="w-full bg-surface-2 border-2 border-line rounded-nb p-2.5 text-ink"
                 >
                   <option value="critical">CRITICAL</option>
                   <option value="high">HIGH</option>
@@ -712,7 +708,7 @@ export default function AdminPage() {
 
               <button
                 type="submit"
-                className="w-full py-2.5 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl transition cursor-pointer mt-2"
+                className="w-full py-2.5 bg-red-600 hover:bg-red-500 text-white font-bold rounded-nb transition cursor-pointer mt-2"
               >
                 Publish Geofence to System
               </button>

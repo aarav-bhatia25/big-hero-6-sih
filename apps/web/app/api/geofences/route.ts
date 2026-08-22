@@ -57,7 +57,7 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = requireAuth(request, ['authority', 'admin']);
+  const auth = await requireAuth(request, ['authority', 'admin']);
   if (auth.errorResponse) return auth.errorResponse;
 
   try {

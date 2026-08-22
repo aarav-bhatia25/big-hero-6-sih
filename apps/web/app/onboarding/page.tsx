@@ -6,6 +6,7 @@ import {
   ShieldCheck, ArrowRight, ArrowLeft, CheckCircle2, AlertTriangle,
   Fingerprint, BookUser, Loader2, KeyRound, FlaskConical, Copy,
 } from 'lucide-react';
+import ThemeToggle from '@/components/ui/ThemeToggle';
 
 type Method = 'aadhaar' | 'passport';
 type Step = 'method' | 'details' | 'otp' | 'consent' | 'done';
@@ -109,16 +110,19 @@ export default function OnboardingPage() {
   const stepIndex = ['method', 'details', 'otp', 'consent', 'done'].indexOf(step);
 
   return (
-    <main className="min-h-screen bg-slate-50 px-5 py-10">
+    <main className="min-h-screen bg-bg px-5 py-10">
       <div className="mx-auto max-w-2xl">
-        <Link href="/" className="flex items-center gap-2 text-sm font-bold text-brand-600">
-          <ShieldCheck size={19} /> Prahari
-        </Link>
+        <div className="flex items-center justify-between">
+          <Link href="/" className="flex items-center gap-2 text-sm font-bold text-accent">
+            <ShieldCheck size={19} /> Prahari
+          </Link>
+          <ThemeToggle />
+        </div>
 
         {/* Sandbox notice — must never be removed while the provider is simulated */}
-        <div className="mt-6 flex items-start gap-3 rounded-xl border border-amber-300 bg-amber-50 p-4">
-          <FlaskConical className="mt-0.5 shrink-0 text-amber-600" size={18} />
-          <div className="text-xs text-amber-900">
+        <div className="mt-6 flex items-start gap-3 rounded-nb border border-amber-300 bg-amber-50 p-4">
+          <FlaskConical className="mt-0.5 shrink-0 text-warning" size={18} />
+          <div className="text-xs text-warning">
             <strong className="block text-sm">Sandbox verification</strong>
             Aadhaar checksum and passport MRZ check digits are validated for real. The
             identity lookup itself is simulated — this is not a UIDAI authentication and
@@ -129,7 +133,7 @@ export default function OnboardingPage() {
         <div className="mt-8 text-center">
           <span className="text-sm font-bold text-brand-600">DIGITAL TOURIST ID</span>
           <h1 className="mt-2 text-3xl font-bold">Travel safer, on your terms.</h1>
-          <p className="mx-auto mt-3 max-w-xl text-slate-500">
+          <p className="mx-auto mt-3 max-w-xl text-ink-soft">
             Create a consent-based, verifiable tourist credential. Your personal
             information is shared only when you authorise it or during an active emergency.
           </p>
@@ -142,18 +146,18 @@ export default function OnboardingPage() {
             return (
               <div key={label} className="flex flex-1 items-center gap-2">
                 <div className={`grid size-7 shrink-0 place-items-center rounded-full text-xs font-bold ${
-                  reached ? 'bg-brand-600 text-white' : 'bg-slate-200 text-slate-500'}`}>
+                  reached ? 'bg-brand-600 text-white' : 'bg-surface-2 text-ink-soft'}`}>
                   {i + 1}
                 </div>
-                <span className={`text-xs font-semibold ${reached ? 'text-slate-900' : 'text-slate-400'}`}>{label}</span>
-                {i < 3 && <div className={`h-px flex-1 ${reached ? 'bg-brand-600' : 'bg-slate-200'}`} />}
+                <span className={`text-xs font-semibold ${reached ? 'text-ink' : 'text-ink-soft'}`}>{label}</span>
+                {i < 3 && <div className={`h-px flex-1 ${reached ? 'bg-brand-600' : 'bg-surface-2'}`} />}
               </div>
             );
           })}
         </div>
 
         {error && (
-          <div className="mt-6 flex items-start gap-2 rounded-xl border border-red-300 bg-red-50 p-4 text-sm text-red-800">
+          <div className="mt-6 flex items-start gap-2 rounded-nb border border-red-300 bg-red-50 p-4 text-sm text-danger">
             <AlertTriangle size={17} className="mt-0.5 shrink-0" /> <span>{error}</span>
           </div>
         )}
@@ -168,11 +172,11 @@ export default function OnboardingPage() {
               <button
                 key={id}
                 onClick={() => { setMethod(id); setStep('details'); setError(null); }}
-                className="rounded-2xl border border-slate-200 bg-white p-6 text-left transition hover:border-brand-500 hover:shadow-md"
+                className="rounded-nb border-2 border-line bg-surface p-6 text-left transition hover:border-brand-500 hover:shadow-nb"
               >
                 <Icon className="text-brand-600" size={26} />
                 <h2 className="mt-4 font-bold">{title}</h2>
-                <p className="mt-1 text-sm text-slate-500">{sub}</p>
+                <p className="mt-1 text-sm text-ink-soft">{sub}</p>
                 <span className="mt-4 inline-flex items-center gap-1 text-sm font-bold text-brand-600">
                   Continue <ArrowRight size={15} />
                 </span>
@@ -183,21 +187,21 @@ export default function OnboardingPage() {
 
         {/* STEP 2 — details */}
         {step === 'details' && (
-          <form onSubmit={handleInitiate} className="mt-6 space-y-4 rounded-2xl border border-slate-200 bg-white p-6">
+          <form onSubmit={handleInitiate} className="mt-6 space-y-4 rounded-nb border-2 border-line bg-surface p-6">
             {method === 'aadhaar' ? (
               <>
                 <div>
                   <label className="text-sm font-semibold">Full name (as on Aadhaar)</label>
                   <input value={fullName} onChange={(e) => setFullName(e.target.value)} required
-                    className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-brand-500"
+                    className="mt-1 w-full rounded-nb border-2 border-line px-3 py-2.5 text-sm outline-none focus:border-brand-500"
                     placeholder="Ralston Fernandes" />
                 </div>
                 <div>
                   <label className="text-sm font-semibold">Aadhaar number</label>
                   <input value={aadhaar} onChange={(e) => setAadhaar(e.target.value)} required inputMode="numeric"
-                    className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5 font-mono text-sm outline-none focus:border-brand-500"
+                    className="mt-1 w-full rounded-nb border-2 border-line px-3 py-2.5 font-mono text-sm outline-none focus:border-brand-500"
                     placeholder="XXXX XXXX XXXX" maxLength={14} />
-                  <p className="mt-1.5 text-xs text-slate-500">
+                  <p className="mt-1.5 text-xs text-ink-soft">
                     Validated with the Verhoeff checksum. Never stored — only a salted hash is kept.
                   </p>
                   <button type="button" onClick={() => setAadhaar('234567890124')}
@@ -211,16 +215,16 @@ export default function OnboardingPage() {
                 <div>
                   <label className="text-sm font-semibold">Passport MRZ — line 1</label>
                   <input value={mrz1} onChange={(e) => setMrz1(e.target.value)} required
-                    className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5 font-mono text-xs uppercase outline-none focus:border-brand-500"
+                    className="mt-1 w-full rounded-nb border-2 border-line px-3 py-2.5 font-mono text-xs uppercase outline-none focus:border-brand-500"
                     placeholder="P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<" />
                 </div>
                 <div>
                   <label className="text-sm font-semibold">Passport MRZ — line 2</label>
                   <input value={mrz2} onChange={(e) => setMrz2(e.target.value)} required
-                    className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5 font-mono text-xs uppercase outline-none focus:border-brand-500"
+                    className="mt-1 w-full rounded-nb border-2 border-line px-3 py-2.5 font-mono text-xs uppercase outline-none focus:border-brand-500"
                     placeholder="L898902C36UTO7408122F3404159ZE184226B<<<<<16" />
                 </div>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-ink-soft">
                   The two 44-character lines at the bottom of the photo page. Check digits are
                   verified against ICAO 9303 — a mistyped line is rejected.
                 </p>
@@ -233,11 +237,11 @@ export default function OnboardingPage() {
 
             <div className="flex gap-3 pt-2">
               <button type="button" onClick={() => { setStep('method'); setError(null); }}
-                className="flex items-center gap-1.5 rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-bold text-slate-700">
+                className="flex items-center gap-1.5 rounded-nb border-2 border-line px-4 py-2.5 text-sm font-bold text-ink">
                 <ArrowLeft size={15} /> Back
               </button>
               <button type="submit" disabled={busy}
-                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60">
+                className="flex flex-1 items-center justify-center gap-2 rounded-nb bg-brand-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60">
                 {busy ? <Loader2 size={16} className="animate-spin" /> : <ShieldCheck size={16} />}
                 {busy ? 'Verifying…' : 'Verify identity'}
               </button>
@@ -247,23 +251,23 @@ export default function OnboardingPage() {
 
         {/* STEP 3 — OTP */}
         {step === 'otp' && (
-          <form onSubmit={handleOtp} className="mt-6 space-y-4 rounded-2xl border border-slate-200 bg-white p-6">
+          <form onSubmit={handleOtp} className="mt-6 space-y-4 rounded-nb border-2 border-line bg-surface p-6">
             <div className="flex items-center gap-3">
               <KeyRound className="text-brand-600" size={22} />
               <div>
                 <h2 className="font-bold">Enter the OTP</h2>
-                <p className="text-sm text-slate-500">Sent to the mobile linked with {maskedTarget}</p>
+                <p className="text-sm text-ink-soft">Sent to the mobile linked with {maskedTarget}</p>
               </div>
             </div>
 
             {sandboxOtp && (
-              <div className="flex items-center justify-between rounded-xl border border-amber-300 bg-amber-50 px-4 py-3">
-                <div className="text-xs text-amber-900">
+              <div className="flex items-center justify-between rounded-nb border border-amber-300 bg-amber-50 px-4 py-3">
+                <div className="text-xs text-warning">
                   <strong>Sandbox OTP:</strong> <span className="font-mono text-base font-bold">{sandboxOtp}</span>
                   <span className="mt-0.5 block">No SMS is sent — a licensed provider would deliver this.</span>
                 </div>
                 <button type="button" onClick={() => setOtp(sandboxOtp)}
-                  className="flex items-center gap-1 rounded-lg bg-amber-600 px-2.5 py-1.5 text-xs font-bold text-white">
+                  className="flex items-center gap-1 rounded-nb bg-amber-600 px-2.5 py-1.5 text-xs font-bold text-white">
                   <Copy size={13} /> Fill
                 </button>
               </div>
@@ -271,17 +275,17 @@ export default function OnboardingPage() {
 
             <input value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))} required
               inputMode="numeric" maxLength={6}
-              className="w-full rounded-xl border border-slate-300 px-3 py-3 text-center font-mono text-2xl tracking-[0.4em] outline-none focus:border-brand-500"
+              className="w-full rounded-nb border-2 border-line px-3 py-3 text-center font-mono text-2xl tracking-[0.4em] outline-none focus:border-brand-500"
               placeholder="000000" />
-            <p className="text-xs text-slate-500">Expires in 10 minutes. Three incorrect attempts locks the session.</p>
+            <p className="text-xs text-ink-soft">Expires in 10 minutes. Three incorrect attempts locks the session.</p>
 
             <div className="flex gap-3 pt-1">
               <button type="button" onClick={() => { setStep('details'); setOtp(''); setError(null); }}
-                className="flex items-center gap-1.5 rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-bold text-slate-700">
+                className="flex items-center gap-1.5 rounded-nb border-2 border-line px-4 py-2.5 text-sm font-bold text-ink">
                 <ArrowLeft size={15} /> Back
               </button>
               <button type="submit" disabled={busy || otp.length !== 6}
-                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60">
+                className="flex flex-1 items-center justify-center gap-2 rounded-nb bg-brand-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60">
                 {busy ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
                 {busy ? 'Checking…' : 'Confirm OTP'}
               </button>
@@ -291,27 +295,27 @@ export default function OnboardingPage() {
 
         {/* STEP 4 — consent */}
         {step === 'consent' && (
-          <form onSubmit={handleIssue} className="mt-6 space-y-4 rounded-2xl border border-slate-200 bg-white p-6">
-            <div className="flex items-center gap-2 rounded-xl bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
+          <form onSubmit={handleIssue} className="mt-6 space-y-4 rounded-nb border-2 border-line bg-surface p-6">
+            <div className="flex items-center gap-2 rounded-nb bg-emerald-50 px-4 py-3 text-sm font-semibold text-success">
               <CheckCircle2 size={17} /> Identity verified{fullName ? ` — ${fullName}` : ''}
             </div>
 
-            <h2 className="pt-1 font-bold">Emergency contact <span className="font-normal text-slate-400">(optional)</span></h2>
+            <h2 className="pt-1 font-bold">Emergency contact <span className="font-normal text-ink-soft">(optional)</span></h2>
             <div className="grid gap-3 sm:grid-cols-2">
               <input value={contactName} onChange={(e) => setContactName(e.target.value)} placeholder="Contact name"
-                className="rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-brand-500" />
+                className="rounded-nb border-2 border-line px-3 py-2.5 text-sm outline-none focus:border-brand-500" />
               <input value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} placeholder="+91 98765 43210"
-                className="rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-brand-500" />
+                className="rounded-nb border-2 border-line px-3 py-2.5 text-sm outline-none focus:border-brand-500" />
             </div>
             <input value={hotel} onChange={(e) => setHotel(e.target.value)} placeholder="Accommodation (optional)"
-              className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-brand-500" />
+              className="w-full rounded-nb border-2 border-line px-3 py-2.5 text-sm outline-none focus:border-brand-500" />
 
-            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <label className="flex cursor-pointer items-start gap-3 rounded-nb border-2 border-line bg-surface-2 p-4">
               <input type="checkbox" checked={trackingConsent} onChange={(e) => setTrackingConsent(e.target.checked)}
                 className="mt-0.5 size-4 accent-brand-600" />
               <span className="text-sm">
                 <strong className="block">Share my location with authorities</strong>
-                <span className="text-slate-500">
+                <span className="text-ink-soft">
                   Location is visible to authorities only during an active emergency or an
                   authorised missing-person investigation. Revocable at any time.
                 </span>
@@ -319,7 +323,7 @@ export default function OnboardingPage() {
             </label>
 
             <button type="submit" disabled={busy}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 py-3 text-sm font-bold text-white disabled:opacity-60">
+              className="flex w-full items-center justify-center gap-2 rounded-nb bg-brand-600 px-4 py-3 text-sm font-bold text-white disabled:opacity-60">
               {busy ? <Loader2 size={16} className="animate-spin" /> : <ShieldCheck size={16} />}
               {busy ? 'Issuing credential…' : 'Issue my Digital Tourist ID'}
             </button>
@@ -328,20 +332,20 @@ export default function OnboardingPage() {
 
         {/* STEP 5 — done */}
         {step === 'done' && issued && (
-          <div className="mt-6 space-y-4 rounded-2xl border border-emerald-300 bg-white p-6">
+          <div className="mt-6 space-y-4 rounded-nb border border-emerald-300 bg-surface p-6">
             <div className="flex items-center gap-3">
-              <div className="grid size-11 place-items-center rounded-full bg-emerald-100 text-emerald-700">
+              <div className="grid size-11 place-items-center rounded-full bg-emerald-100 text-success">
                 <CheckCircle2 size={24} />
               </div>
               <div>
                 <h2 className="text-lg font-bold">Credential issued</h2>
-                <p className="text-sm text-slate-500">
+                <p className="text-sm text-ink-soft">
                   {issued.reissued ? 'Existing identity re-verified.' : 'Your Digital Tourist ID is active.'}
                 </p>
               </div>
             </div>
 
-            <dl className="grid gap-2 rounded-xl bg-slate-50 p-4 text-xs">
+            <dl className="grid gap-2 rounded-nb bg-surface-2 p-4 text-xs">
               {[
                 ['Tourist ID', issued.touristId],
                 ['DID', issued.did],
@@ -349,27 +353,27 @@ export default function OnboardingPage() {
                 ['Valid until', new Date(issued.expiresAt).toLocaleDateString()],
               ].map(([k, v]) => (
                 <div key={k as string} className="flex flex-wrap justify-between gap-2">
-                  <dt className="font-semibold text-slate-500">{k}</dt>
-                  <dd className="break-all font-mono text-slate-800">{v as string}</dd>
+                  <dt className="font-semibold text-ink-soft">{k}</dt>
+                  <dd className="break-all font-mono text-ink">{v as string}</dd>
                 </div>
               ))}
             </dl>
 
             <div className="flex flex-wrap gap-3">
               <Link href="/citizen"
-                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-bold text-white">
+                className="flex flex-1 items-center justify-center gap-2 rounded-nb bg-brand-600 px-4 py-2.5 text-sm font-bold text-white">
                 Open my safety dashboard <ArrowRight size={15} />
               </Link>
               <a href={`/api/identity/verify/${encodeURIComponent(issued.did)}`} target="_blank" rel="noreferrer"
-                className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-bold text-slate-700">
+                className="rounded-nb border-2 border-line px-4 py-2.5 text-sm font-bold text-ink">
                 Verify credential
               </a>
             </div>
           </div>
         )}
 
-        <p className="mt-6 flex justify-center gap-2 text-center text-xs text-slate-500">
-          <CheckCircle2 size={15} className="text-emerald-600" /> You can revoke consent at any time.
+        <p className="mt-6 flex justify-center gap-2 text-center text-xs text-ink-soft">
+          <CheckCircle2 size={15} className="text-success" /> You can revoke consent at any time.
         </p>
       </div>
     </main>

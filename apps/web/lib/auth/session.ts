@@ -19,13 +19,25 @@ export interface AuthSession {
 export const SESSION_COOKIE_NAME = 'prahari_session';
 const SESSION_DURATION_SEC = 7 * 24 * 60 * 60; // 7 days
 
+let warnedDefaultSecret = false;
+
 function getSecretKey(): string {
-  return (
+  const secret =
     process.env.SESSION_SECRET ||
     process.env.IDENTITY_SIGNING_KEY ||
-    process.env.KYC_HASH_SALT ||
-    'prahari-default-session-hmac-secret-salt-2026'
-  );
+    process.env.KYC_HASH_SALT;
+
+  if (!secret) {
+    if (!warnedDefaultSecret) {
+      warnedDefaultSecret = true;
+      console.warn(
+        '[prahari] SECURITY: no SESSION_SECRET / IDENTITY_SIGNING_KEY / KYC_HASH_SALT set — ' +
+          'session tokens are signed with a public default key and are forgeable. Set SESSION_SECRET.'
+      );
+    }
+    return 'prahari-default-session-hmac-secret-salt-2026';
+  }
+  return secret;
 }
 
 function base64UrlEncode(str: string): string {
@@ -54,14 +66,15 @@ function base64UrlDecode(str: string): string {
 }
 
 /**
- * Simple, fast HMAC-SHA256 signature generator using Web Crypto or pure SHA-256
+ * Real HMAC-SHA256 over the encoded payload, using Web Crypto so the same code
+ * runs in both the Edge middleware runtime and Node route handlers. Returns a
+ * base64url-encoded signature.
  */
-async function computeHmacSignature(data: string, secret: string): Promise<string> {
+async function hmacSign(data: string, secret: string): Promise<string> {
   const encoder = new TextEncoder();
-  const keyData = encoder.encode(secret);
   const key = await crypto.subtle.importKey(
     'raw',
-    keyData,
+    encoder.encode(secret),
     { name: 'HMAC', hash: 'SHA-256' },
     false,
     ['sign']
@@ -78,27 +91,23 @@ async function computeHmacSignature(data: string, secret: string): Promise<strin
     .replace(/\//g, '_');
 }
 
-/**
- * Fallback sync signature generator for immediate token production
- */
-function syncHmacSign(data: string, secret: string): string {
-  // Deterministic FNV-1a mixing across payload and secret
-  let hash = 0x811c9dc5;
-  const combined = `${secret}:${data}`;
-  for (let i = 0; i < combined.length; i++) {
-    hash ^= combined.charCodeAt(i);
-    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+/** Constant-time string comparison to avoid signature timing leaks. */
+function timingSafeStringEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
   }
-  return (hash >>> 0).toString(36) + base64UrlEncode(secret.slice(0, 8));
+  return diff === 0;
 }
 
 /**
- * Creates a signed stateless session token.
+ * Creates a signed stateless session token: `<base64url(payload)>.<base64url(hmac)>`.
  */
-export function createSessionToken(
+export async function createSessionToken(
   data: Omit<AuthSession, 'iat' | 'exp'>,
   durationSec: number = SESSION_DURATION_SEC
-): string {
+): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   const payload: AuthSession = {
     ...data,
@@ -106,17 +115,17 @@ export function createSessionToken(
     exp: now + durationSec,
   };
 
-  const payloadJson = JSON.stringify(payload);
-  const encodedPayload = base64UrlEncode(payloadJson);
-  const signature = syncHmacSign(encodedPayload, getSecretKey());
+  const encodedPayload = base64UrlEncode(JSON.stringify(payload));
+  const signature = await hmacSign(encodedPayload, getSecretKey());
 
   return `${encodedPayload}.${signature}`;
 }
 
 /**
- * Verifies a session token, returning the payload if valid and unexpired, or null otherwise.
+ * Verifies a session token, returning the payload if the HMAC is valid and the
+ * token is unexpired, or null otherwise.
  */
-export function verifySessionToken(token: string): AuthSession | null {
+export async function verifySessionToken(token: string): Promise<AuthSession | null> {
   if (!token || typeof token !== 'string') return null;
 
   const parts = token.split('.');
@@ -126,13 +135,12 @@ export function verifySessionToken(token: string): AuthSession | null {
   if (!encodedPayload || !signature) return null;
 
   try {
-    const expectedSig = syncHmacSign(encodedPayload, getSecretKey());
-    if (signature !== expectedSig) {
+    const expectedSig = await hmacSign(encodedPayload, getSecretKey());
+    if (!timingSafeStringEqual(signature, expectedSig)) {
       return null;
     }
 
-    const payloadJson = base64UrlDecode(encodedPayload);
-    const session: AuthSession = JSON.parse(payloadJson);
+    const session: AuthSession = JSON.parse(base64UrlDecode(encodedPayload));
 
     const now = Math.floor(Date.now() / 1000);
     if (session.exp && session.exp < now) {
@@ -148,11 +156,11 @@ export function verifySessionToken(token: string): AuthSession | null {
 /**
  * Extracts and verifies session from NextRequest (Cookie or Authorization header).
  */
-export function getSessionFromRequest(request: NextRequest): AuthSession | null {
+export async function getSessionFromRequest(request: NextRequest): Promise<AuthSession | null> {
   // 1. Check Cookie
   const cookieToken = request.cookies.get(SESSION_COOKIE_NAME)?.value;
   if (cookieToken) {
-    const session = verifySessionToken(cookieToken);
+    const session = await verifySessionToken(cookieToken);
     if (session) return session;
   }
 
@@ -160,7 +168,7 @@ export function getSessionFromRequest(request: NextRequest): AuthSession | null 
   const authHeader = request.headers.get('authorization') || request.headers.get('Authorization');
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const bearerToken = authHeader.slice(7).trim();
-    const session = verifySessionToken(bearerToken);
+    const session = await verifySessionToken(bearerToken);
     if (session) return session;
   }
 
@@ -169,7 +177,7 @@ export function getSessionFromRequest(request: NextRequest): AuthSession | null 
   if (rawCookieHeader) {
     const match = rawCookieHeader.match(new RegExp(`(?:^|;\\s*)${SESSION_COOKIE_NAME}=([^;]+)`));
     if (match?.[1]) {
-      const session = verifySessionToken(decodeURIComponent(match[1]));
+      const session = await verifySessionToken(decodeURIComponent(match[1]));
       if (session) return session;
     }
   }

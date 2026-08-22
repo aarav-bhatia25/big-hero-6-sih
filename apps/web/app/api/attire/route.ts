@@ -3,7 +3,7 @@ import { getTourist, updateTourist, upsertTourist } from '@/lib/db';
 import { requireAuth, canAccessTouristData } from '@/lib/auth/guards';
 
 export async function POST(request: NextRequest) {
-  const auth = requireAuth(request, ['tourist', 'authority', 'admin', 'responder']);
+  const auth = await requireAuth(request, ['tourist', 'authority', 'admin', 'responder']);
   if (auth.errorResponse) return auth.errorResponse;
 
   const { session } = auth;

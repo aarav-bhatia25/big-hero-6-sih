@@ -89,17 +89,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 3. Verify password
+    // 3. Verify password against the stored hash. The fallback list is only
+    //    used to bootstrap a not-yet-seeded account above; once a user exists
+    //    in the database, its stored password is the sole authority.
     const isPasswordValid = verifyPassword(password, user.passwordHash, user.salt);
     if (!isPasswordValid) {
-      // Check fallback password match as secondary check during dev bootstrap
-      const fallback = DEFAULT_FALLBACK_STAFF.find((s) => s.email === normalizedEmail);
-      if (!(fallback && fallback.password === password)) {
-        return NextResponse.json(
-          { success: false, error: 'Invalid email or password.' },
-          { status: 401 }
-        );
-      }
+      return NextResponse.json(
+        { success: false, error: 'Invalid email or password.' },
+        { status: 401 }
+      );
     }
 
     if (user.active === false) {
@@ -110,7 +108,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 4. Create session token
-    const sessionToken = createSessionToken({
+    const sessionToken = await createSessionToken({
       userId: user.userId,
       role: user.role,
       email: user.email,

@@ -2,7 +2,171 @@
 @tailwind components;
 @tailwind utilities;
 
-:root { --background: 210 25% 98%; --foreground: 222 47% 15%; }
-* { border-color: #e5eaf0; }
-body { min-height: 100vh; background: #f6f8fa; color: #14213d; }
-.maplibregl-ctrl-attrib { font-size: 10px; }
+/* ───────────────────────────── Neobrutalism design tokens ─────────────────
+   Accent: sky blue.  Dark mode: Google grey.
+   Thick borders + hard (blur-less) offset shadows are the signature. */
+@layer base {
+  :root {
+    --nb-bg: #eef1f6;
+    --nb-surface: #ffffff;
+    --nb-surface-2: #e7ebf1;
+    --nb-ink: #0f1419;
+    --nb-ink-soft: #55606e;
+    --nb-border: #0f1419;
+
+    --nb-accent: #0ea5e9;        /* sky-500 */
+    --nb-accent-strong: #0284c7; /* sky-600 */
+    --nb-accent-soft: #e0f2fe;   /* sky-100 tinted fill */
+    --nb-accent-ink: #04283a;    /* near-black text on accent */
+
+    --nb-shadow: 4px 4px 0 var(--nb-border);
+    --nb-radius: 6px;
+  }
+
+  .dark {
+    --nb-bg: #202124;            /* Google grey background */
+    --nb-surface: #2a2b2e;
+    --nb-surface-2: #35363a;
+    --nb-ink: #e8eaed;           /* Google grey light text */
+    --nb-ink-soft: #9aa0a6;
+    --nb-border: #e8eaed;        /* light borders read on dark */
+
+    --nb-accent: #38bdf8;        /* sky-400, brighter on dark */
+    --nb-accent-strong: #0ea5e9;
+    --nb-accent-soft: #123143;
+    --nb-accent-ink: #04283a;
+
+    --nb-shadow: 4px 4px 0 var(--nb-border);
+    --nb-radius: 6px;
+  }
+
+  * {
+    border-color: var(--nb-border);
+  }
+
+  body {
+    min-height: 100vh;
+    background: var(--nb-bg);
+    color: var(--nb-ink);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection {
+    background: var(--nb-accent);
+    color: var(--nb-accent-ink);
+  }
+
+  .maplibregl-ctrl-attrib {
+    font-size: 10px;
+  }
+}
+
+/* ───────────────────────────── Neobrutalist primitives ────────────────────
+   Written as raw CSS on top of the tokens so they never depend on custom
+   Tailwind utilities being present at @apply time. */
+@layer components {
+  .nb-card {
+    background: var(--nb-surface);
+    border: 2px solid var(--nb-border);
+    border-radius: var(--nb-radius);
+    box-shadow: var(--nb-shadow);
+  }
+  .nb-card-flat {
+    background: var(--nb-surface);
+    border: 2px solid var(--nb-border);
+    border-radius: var(--nb-radius);
+  }
+  .nb-inset {
+    background: var(--nb-surface-2);
+    border: 2px solid var(--nb-border);
+    border-radius: var(--nb-radius);
+  }
+
+  .nb-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    font-weight: 700;
+    border: 2px solid var(--nb-border);
+    border-radius: var(--nb-radius);
+    background: var(--nb-surface);
+    color: var(--nb-ink);
+    padding: 0.5rem 1rem;
+    box-shadow: var(--nb-shadow);
+    transition: transform 0.08s ease, box-shadow 0.08s ease, background 0.15s ease;
+    cursor: pointer;
+    user-select: none;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+  .nb-btn:hover {
+    transform: translate(-1px, -1px);
+    box-shadow: 6px 6px 0 var(--nb-border);
+  }
+  .nb-btn:active {
+    transform: translate(2px, 2px);
+    box-shadow: none;
+  }
+  .nb-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: var(--nb-shadow);
+  }
+  .nb-btn-accent {
+    background: var(--nb-accent);
+    color: var(--nb-accent-ink);
+  }
+  .nb-btn-danger {
+    background: var(--nb-danger, #e11d48);
+    color: #ffffff;
+  }
+  .nb-btn-ghost {
+    background: transparent;
+    box-shadow: none;
+  }
+  .nb-btn-ghost:hover {
+    background: var(--nb-surface-2);
+    transform: none;
+    box-shadow: none;
+  }
+
+  .nb-input {
+    width: 100%;
+    background: var(--nb-surface);
+    color: var(--nb-ink);
+    border: 2px solid var(--nb-border);
+    border-radius: var(--nb-radius);
+    padding: 0.5rem 0.75rem;
+    outline: none;
+    transition: box-shadow 0.1s ease, border-color 0.1s ease;
+  }
+  .nb-input::placeholder {
+    color: var(--nb-ink-soft);
+    opacity: 0.7;
+  }
+  .nb-input:focus {
+    border-color: var(--nb-accent);
+    box-shadow: 4px 4px 0 var(--nb-accent);
+  }
+
+  .nb-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 11px;
+    border: 2px solid var(--nb-border);
+    border-radius: var(--nb-radius);
+    padding: 0.125rem 0.5rem;
+    background: var(--nb-surface);
+    color: var(--nb-ink);
+  }
+  .nb-chip-accent {
+    background: var(--nb-accent);
+    color: var(--nb-accent-ink);
+  }
+}

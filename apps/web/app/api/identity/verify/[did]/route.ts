@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getTouristByDid } from "@/lib/db";
 import { verifyCredential } from "@/lib/identity/credential";
+import { verifyOnChain } from "@/lib/blockchain/registry";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +25,12 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ did
       });
     }
 
+    // Cryptographic check of the Ed25519 signature (offline, always available).
     const result = verifyCredential(tourist.credential);
+
+    // Independent on-chain check: is this exact credential hash anchored, and
+    // does the chain still consider it active? Null if no chain is configured.
+    const onChain = tourist.credentialHash ? await verifyOnChain(tourist.credentialHash) : null;
 
     return NextResponse.json({
       ok: true,
@@ -40,6 +46,15 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ did
       expiresAt: tourist.credential?.expirationDate ?? null,
       kycMethod: tourist.kycMethod,
       sandbox: Boolean(tourist.credential?.sandbox),
+      blockchain: onChain
+        ? {
+            anchored: onChain.exists,
+            valid: onChain.isValid,
+            state: onChain.state,
+            chainId: onChain.chainId,
+            txHash: tourist.anchorTxHash ?? null,
+          }
+        : null,
     });
   } catch (error: any) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });

@@ -12,7 +12,7 @@ const ROLE_ROUTE_MAP: Record<string, string[]> = {
   '/dir': ['admin', 'authority', 'responder', 'tourist'],
 };
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // 1. Skip static assets, _next, favicon, and API routes (API routes have their own requireAuth guards)
@@ -28,7 +28,7 @@ export function middleware(request: NextRequest) {
 
   // 2. Extract and verify session cookie
   const cookie = request.cookies.get(SESSION_COOKIE_NAME)?.value;
-  const session = cookie ? verifySessionToken(cookie) : null;
+  const session = cookie ? await verifySessionToken(cookie) : null;
 
   // 3. Handle /login page: if already logged in, redirect to appropriate home
   if (pathname === '/login') {

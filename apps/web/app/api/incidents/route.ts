@@ -36,7 +36,7 @@ const MOCK_FALLBACK_INCIDENTS = [
 ];
 
 export async function POST(request: NextRequest) {
-  const auth = requireAuth(request, ['tourist', 'authority', 'admin', 'responder']);
+  const auth = await requireAuth(request, ['tourist', 'authority', 'admin', 'responder']);
   if (auth.errorResponse) return auth.errorResponse;
 
   const { session } = auth;
@@ -112,7 +112,7 @@ export async function POST(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest) {
-  const auth = requireAuth(request);
+  const auth = await requireAuth(request);
   if (auth.errorResponse) return auth.errorResponse;
 
   const { session } = auth;
@@ -141,7 +141,7 @@ export async function GET(request: NextRequest) {
  * Dispatch / status update. Requires responder, authority, or admin role.
  */
 export async function PATCH(request: NextRequest) {
-  const auth = requireAuth(request, ['responder', 'authority', 'admin']);
+  const auth = await requireAuth(request, ['responder', 'authority', 'admin']);
   if (auth.errorResponse) return auth.errorResponse;
 
   try {
