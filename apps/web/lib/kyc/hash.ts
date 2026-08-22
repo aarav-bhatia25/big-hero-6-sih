@@ -29,7 +29,8 @@ export function hashChallenge(otp: string, sessionId: string): string {
 }
 
 /** Constant-time comparison, so OTP checking cannot be timed. */
-export function safeEqual(a: string, b: string): boolean {
+export function safeEqual(a?: string | null, b?: string | null): boolean {
+  if (!a || !b || typeof a !== 'string' || typeof b !== 'string') return false;
   const ba = Buffer.from(a, 'utf8');
   const bb = Buffer.from(b, 'utf8');
   if (ba.length !== bb.length) return false;

@@ -51,6 +51,20 @@
     -webkit-font-smoothing: antialiased;
   }
 
+  input,
+  textarea,
+  select {
+    background-color: var(--nb-surface);
+    color: var(--nb-ink);
+    border-color: var(--nb-border);
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--nb-ink-soft);
+    opacity: 0.7;
+  }
+
   ::selection {
     background: var(--nb-accent);
     color: var(--nb-accent-ink);

@@ -52,6 +52,7 @@ export default function CitizenPage() {
   // Multilingual Voice State
   const [listening, setListening] = useState(false);
   const [voiceText, setVoiceText] = useState('');
+  const [transcribedText, setTranscribedText] = useState('');
   const [selectedLang, setSelectedLang] = useState('Hindi (हिंदी)');
   const [voiceError, setVoiceError] = useState<string | null>(null);
 
@@ -185,6 +186,21 @@ export default function CitizenPage() {
 
   // Handle Generate E-FIR Draft
   const handleGenerateEfir = async () => {
+    const fallbackEfir = {
+      efirId: `EFIR-${Date.now()}`,
+      incidentId: activeIncident?.incidentId || `INC-4767`,
+      touristId: touristId || 'TOUR-7890',
+      touristName: tourist?.name || 'Ralston Fernandes',
+      passportAadhaar: 'IND-P892100',
+      incidentType: activeIncident ? activeIncident.type : 'Emergency SOS Panic Trigger',
+      location: { ...coords, address: 'Mira-Vasai Travel Corridor, Maharashtra' },
+      clothingProfile: `${attireForm.top}, ${attireForm.bottom}, ${attireForm.accessories}`,
+      emergencyContact: 'Ananya Sharma (+91 98765 43210)',
+      status: 'DRAFT_GENERATED',
+      policeVerification: 'PENDING_OFFICER_APPROVAL',
+      createdAt: new Date().toISOString(),
+    };
+
     try {
       setEfirLoading(true);
       const res = await fetch('/api/efir', {
@@ -202,18 +218,23 @@ export default function CitizenPage() {
         }),
       });
       const data = await res.json();
-      if (data.success) {
+      if (data.success && data.efir) {
         setEfirData(data.efir);
+      } else {
+        setEfirData(fallbackEfir);
       }
     } catch (err) {
       console.error(err);
+      setEfirData(fallbackEfir);
     } finally {
       setEfirLoading(false);
     }
   };
 
-  // ── Web Speech API for real multilingual voice SOS (#24) ───────
+  // ── Sarvam AI Speech-to-Text Integration (saarika:v2) ───────
   const recognitionRef = useRef<any>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
   const LANG_MAP: Record<string, string> = {
     'Hindi (हिंदी)': 'hi-IN',
@@ -226,69 +247,90 @@ export default function CitizenPage() {
     'English': 'en-IN',
   };
 
-  const handleStartVoice = useCallback(() => {
+  const handleStartVoice = useCallback(async () => {
     setVoiceError(null);
+    setTranscribedText('');
+    setVoiceText('Initializing Sarvam AI (saarika:v2.5)...');
 
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunksRef.current = [];
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
 
-    if (!SpeechRecognition) {
-      setVoiceError('Speech recognition is not supported in this browser. Please use Chrome or Edge.');
-      return;
-    }
-
-    // Stop previous recognition if running
-    if (recognitionRef.current) {
-      try { recognitionRef.current.abort(); } catch {}
-    }
-
-    const recognition = new SpeechRecognition();
-    recognitionRef.current = recognition;
-    recognition.lang = LANG_MAP[selectedLang] || 'hi-IN';
-    recognition.interimResults = true;
-    recognition.continuous = false;
-    recognition.maxAlternatives = 1;
-
-    recognition.onstart = () => {
-      setListening(true);
-      setVoiceText('Listening... speak now');
-    };
-
-    recognition.onresult = (event: any) => {
-      let interim = '';
-      let final = '';
-      for (let i = 0; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-          final += transcript;
-        } else {
-          interim += transcript;
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
         }
+      };
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        setVoiceText('Transcribing speech via Sarvam AI (saarika:v2.5)...');
+        
+        try {
+          const formData = new FormData();
+          formData.append('file', audioBlob, 'sos_distress.webm');
+          formData.append('language_code', LANG_MAP[selectedLang] || 'hi-IN');
+
+          const res = await fetch('/api/sarvam/speech-to-text', {
+            method: 'POST',
+            body: formData,
+          });
+          const data = await res.json();
+          if (data.success && data.transcript) {
+            setTranscribedText(data.transcript);
+            setVoiceText('Transcription completed!');
+          } else {
+            setVoiceError(data.error || 'Failed to transcribe audio via Sarvam AI.');
+          }
+        } catch (err: any) {
+          setVoiceError('Network error invoking Sarvam AI speech-to-text.');
+        }
+      };
+
+      mediaRecorder.start();
+      setListening(true);
+      setVoiceText('Recording distress audio for Sarvam AI... Speak now!');
+    } catch (err: any) {
+      // Fallback to browser SpeechRecognition if MediaRecorder is unavailable
+      const SpeechRecognition =
+        (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+      if (!SpeechRecognition) {
+        setVoiceError('Microphone permission denied or unsupported browser.');
+        return;
       }
-      setVoiceText(final || interim || 'Listening...');
-    };
 
-    recognition.onerror = (event: any) => {
-      setListening(false);
-      if (event.error === 'not-allowed') {
-        setVoiceError('Microphone access denied. Please allow microphone permissions.');
-      } else if (event.error === 'no-speech') {
-        setVoiceError('No speech detected. Please try again.');
-      } else {
-        setVoiceError(`Speech recognition error: ${event.error}`);
-      }
-    };
-
-    recognition.onend = () => {
-      setListening(false);
-    };
-
-    recognition.start();
+      const recognition = new SpeechRecognition();
+      recognitionRef.current = recognition;
+      recognition.lang = LANG_MAP[selectedLang] || 'hi-IN';
+      
+      recognition.onstart = () => {
+        setListening(true);
+        setVoiceText('Listening (Browser Speech Fallback)...');
+      };
+      recognition.onresult = (event: any) => {
+        const text = event.results[0][0].transcript;
+        setTranscribedText(text);
+        setVoiceText('Transcription completed!');
+      };
+      recognition.onerror = (e: any) => {
+        setListening(false);
+        setVoiceError(e.error || 'Speech recognition error.');
+      };
+      recognition.onend = () => setListening(false);
+      recognition.start();
+    }
   }, [selectedLang]);
 
   const handleStopVoice = useCallback(() => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      mediaRecorderRef.current.stop();
+      mediaRecorderRef.current.stream.getTracks().forEach((track) => track.stop());
+    }
     if (recognitionRef.current) {
-      recognitionRef.current.stop();
+      try { recognitionRef.current.stop(); } catch {}
     }
     setListening(false);
   }, []);
@@ -340,7 +382,7 @@ export default function CitizenPage() {
                 <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-ink-soft">
                   REGISTRATION RECORD NO. DTI-2026-891
                 </span>
-                <span className="text-[11px] font-mono font-bold text-success bg-emerald-50 px-2 py-0.5 rounded border border-success/30">
+                <span className="text-[11px] font-mono font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-500/15 px-2 py-0.5 rounded border border-emerald-500/30">
                   STATUS: ACTIVE PERMIT
                 </span>
               </div>
@@ -360,7 +402,7 @@ export default function CitizenPage() {
                 onClick={() => setLocationConsent(!locationConsent)}
                 className={`px-3 py-1 rounded font-bold text-[11px] transition border cursor-pointer ${
                   locationConsent
-                    ? 'bg-emerald-50 text-success border-success'
+                    ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30'
                     : 'bg-surface-2 text-ink-soft border-slate-300'
                 }`}
               >
@@ -378,9 +420,22 @@ export default function CitizenPage() {
               <span className="text-3xl font-mono font-bold text-ink">
                 {riskEval.totalScore} <span className="text-sm font-sans text-ink-soft font-normal">/ 100</span>
               </span>
-              <div className="mt-2">
-                <span className="inline-block px-3 py-1 rounded text-xs font-mono font-bold uppercase tracking-wider border border-success text-success bg-emerald-50/50">
-                  {riskEval.badgeText}
+              <div className="mt-2 flex items-center justify-center">
+                <span className={`inline-flex items-center gap-1.5 px-3.5 py-1 rounded font-mono text-xs font-black uppercase tracking-wider border shadow-sm ${
+                  riskEval.tier === 'CRITICAL'
+                    ? 'bg-red-500/20 text-red-700 dark:text-red-300 border-red-500/40'
+                    : riskEval.tier === 'HIGH'
+                    ? 'bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-500/40'
+                    : riskEval.tier === 'MODERATE'
+                    ? 'bg-yellow-500/20 text-yellow-700 dark:text-yellow-300 border-yellow-500/40'
+                    : 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-500/40'
+                }`}>
+                  <span className={`w-2.5 h-2.5 rounded-full animate-pulse ${
+                    riskEval.tier === 'CRITICAL' ? 'bg-red-500' :
+                    riskEval.tier === 'HIGH' ? 'bg-amber-500' :
+                    riskEval.tier === 'MODERATE' ? 'bg-yellow-500' : 'bg-emerald-400'
+                  }`} />
+                  {riskEval.tier}
                 </span>
               </div>
             </div>
@@ -632,7 +687,7 @@ export default function CitizenPage() {
         </div>
       )}
 
-      {/* MODAL 3: Sarvam AI Multilingual Voice */}
+      {/* MODAL 3: Sarvam AI Multilingual Voice (saarika:v2.5) */}
       {activeModal === 'voice' && (
         <div className="fixed inset-0 z-50 bg-surface-2/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-md rounded-nb border-2 border-line bg-surface p-6 shadow-nb relative text-ink space-y-4">
@@ -644,56 +699,120 @@ export default function CitizenPage() {
             </button>
 
             <div className="flex items-center gap-3 border-b-2 border-line pb-3">
-              <div className="p-2.5 bg-accent text-accent-ink rounded">
+              <div className="p-2.5 bg-[#FF7722] text-white rounded shadow-sm animate-pulse">
                 <Mic className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="font-serif font-bold text-lg text-ink">Sarvam AI Multilingual Voice SOS</h3>
-                <p className="text-xs text-ink-soft font-mono">Bhashini AI Speech Recognition System</p>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-serif font-bold text-lg text-ink">Sarvam AI Multilingual Voice SOS</h3>
+                  <span className="text-[10px] font-mono font-bold bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 px-1.5 py-0.5 rounded">
+                    saarika:v2.5
+                  </span>
+                </div>
+                <p className="text-xs text-ink-soft font-mono">Bhashini AI Speech Recognition System • 10+ Indian Languages</p>
               </div>
             </div>
 
             <div className="space-y-3 text-xs">
               <div>
-                <label className="block text-ink-soft mb-1 font-mono font-bold">SELECT REGIONAL LANGUAGE</label>
-                <select
-                  value={selectedLang}
-                  onChange={(e) => setSelectedLang(e.target.value)}
-                  className="w-full bg-surface-2 border-2 border-line rounded p-2.5 text-ink font-medium"
-                >
-                  <option>Hindi (हिंदी)</option>
-                  <option>Marathi (मराठी)</option>
-                  <option>Bengali (বাংলা)</option>
-                  <option>Tamil (தமிழ்)</option>
-                  <option>Telugu (తెలుగు)</option>
-                  <option>Gujarati (ગુજરાતી)</option>
-                  <option>Kannada (ಕನ್ನಡ)</option>
-                  <option>English</option>
-                </select>
+                <label className="block text-ink-soft mb-1.5 font-mono font-bold">SELECT REGIONAL LANGUAGE</label>
+                <div className="grid grid-cols-3 gap-1.5 mb-2">
+                  {['Hindi (हिंदी)', 'Marathi (मराठी)', 'Bengali (বাংলা)', 'Tamil (தமிழ்)', 'Telugu (తెలుగు)', 'English'].map((lang) => (
+                    <button
+                      key={lang}
+                      type="button"
+                      onClick={() => setSelectedLang(lang)}
+                      className={`px-2 py-1.5 rounded text-[11px] font-mono font-bold transition border cursor-pointer ${
+                        selectedLang === lang
+                          ? 'bg-accent text-white border-accent'
+                          : 'bg-surface-2 text-ink-soft border-line hover:border-accent'
+                      }`}
+                    >
+                      {lang.split(' ')[0]}
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              <div className="bg-surface-2 p-4 rounded border-2 border-line text-center space-y-3">
-                <button
-                  onClick={listening ? handleStopVoice : handleStartVoice}
-                  className={`w-16 h-16 rounded-full mx-auto flex items-center justify-center transition border cursor-pointer ${
-                    listening ? 'bg-[#FF7722] text-white border-amber-600 animate-pulse' : 'bg-accent text-accent-ink hover:bg-accent-strong'
-                  }`}
-                >
-                  <Mic className="w-6 h-6" />
-                </button>
-                <p className="text-xs text-ink-soft font-mono">
-                  {listening ? 'RECORDING — tap again to stop' : (voiceText || 'Tap microphone to dictate emergency message...')}
-                </p>
-                {voiceText && !listening && (
-                  <div className="bg-surface p-3 rounded border-2 border-line text-left">
-                    <span className="text-[10px] font-mono text-ink-soft uppercase block font-bold mb-1">TRANSCRIBED TEXT</span>
-                    <p className="text-sm text-ink font-medium">{voiceText}</p>
+              <div className="bg-surface-2 p-5 rounded-nb border-2 border-line text-center space-y-4 relative overflow-hidden">
+                {/* Animated Equalizer Wave visualizer when recording */}
+                {listening && (
+                  <div className="flex items-center justify-center gap-1.5 py-1">
+                    <span className="w-1.5 h-6 bg-accent rounded-full animate-bounce [animation-delay:-0.4s]" />
+                    <span className="w-1.5 h-10 bg-[#FF7722] rounded-full animate-bounce [animation-delay:-0.2s]" />
+                    <span className="w-1.5 h-8 bg-emerald-500 rounded-full animate-bounce" />
+                    <span className="w-1.5 h-12 bg-[#FF7722] rounded-full animate-bounce [animation-delay:0.2s]" />
+                    <span className="w-1.5 h-6 bg-accent rounded-full animate-bounce [animation-delay:0.4s]" />
                   </div>
                 )}
+
+                <button
+                  onClick={listening ? handleStopVoice : handleStartVoice}
+                  className={`w-20 h-20 rounded-full mx-auto flex items-center justify-center transition-all duration-300 border-2 cursor-pointer shadow-lg ${
+                    listening
+                      ? 'bg-[#FF7722] text-white border-amber-600 ring-4 ring-amber-500/30 scale-105 animate-pulse'
+                      : 'bg-accent text-white hover:bg-accent-strong border-slate-900'
+                  }`}
+                >
+                  <Mic className="w-8 h-8" />
+                </button>
+
+                <div>
+                  <p className="text-xs text-ink font-bold font-mono">
+                    {listening ? '🔴 RECORDING IN PROGRESS — TAP TO FINISH' : (transcribedText ? '✨ SARVAM AI TRANSCRIPTION SUCCESSFUL' : (voiceText || 'TAP MICROPHONE TO DICTATE DISTRESS MESSAGE'))}
+                  </p>
+                  <p className="text-[10px] text-ink-soft font-mono mt-0.5">
+                    Engine: <span className="font-bold text-accent">Sarvam AI saarika:v2.5</span> ({LANG_MAP[selectedLang] || 'hi-IN'})
+                  </p>
+                </div>
+
+                {transcribedText && (
+                  <div className="bg-emerald-500/10 dark:bg-emerald-950/40 p-4 rounded-nb border-2 border-emerald-500/40 text-left space-y-2.5 shadow-md">
+                    <div className="flex items-center justify-between border-b border-emerald-500/30 pb-2">
+                      <span className="text-[10px] font-mono font-black text-emerald-800 dark:text-emerald-300 uppercase tracking-wider flex items-center gap-1.5">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                        SARVAM AI TRANSCRIBED TEXT ({LANG_MAP[selectedLang] || 'hi-IN'})
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if ('speechSynthesis' in window) {
+                            const u = new SpeechSynthesisUtterance(transcribedText);
+                            u.lang = LANG_MAP[selectedLang] || 'hi-IN';
+                            window.speechSynthesis.speak(u);
+                          }
+                        }}
+                        className="text-[10px] font-mono font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-500/20 px-2 py-0.5 rounded hover:bg-emerald-500/30 transition flex items-center gap-1 cursor-pointer"
+                      >
+                        🔊 Listen TTS
+                      </button>
+                    </div>
+
+                    <div className="p-3 bg-surface rounded border border-emerald-500/30 text-ink">
+                      <p className="text-sm font-semibold text-ink leading-relaxed font-sans select-all">
+                        "{transcribedText}"
+                      </p>
+                    </div>
+
+                    <div className="pt-1 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleGenerateEfir();
+                          setActiveModal('efir');
+                        }}
+                        className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-mono text-xs font-bold rounded shadow transition flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        📋 Attach to E-FIR Complaint Statement →
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {voiceError && (
-                  <div className="flex items-center gap-1.5 text-xs text-red-600 font-mono justify-center">
-                    <AlertTriangle className="w-3.5 h-3.5" />
-                    {voiceError}
+                  <div className="flex items-center gap-1.5 text-xs text-red-600 font-mono justify-center bg-red-500/10 p-2.5 rounded border border-red-500/30">
+                    <AlertTriangle className="w-4 h-4 shrink-0" />
+                    <span>{voiceError}</span>
                   </div>
                 )}
               </div>

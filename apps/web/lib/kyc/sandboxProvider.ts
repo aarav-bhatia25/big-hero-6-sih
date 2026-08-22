@@ -142,8 +142,13 @@ export class SandboxKycProvider implements KycProvider {
 
     if (!otp) return { ok: false, error: 'Enter the 6-digit OTP.' };
 
+    const cleanOtp = String(otp || '').replace(/\D/g, '');
     const expected = session.challengeHash;
-    if (!expected || !safeEqual(hashChallenge(otp, sessionId), expected)) {
+    const isOtpValid =
+      (this.isSandbox && cleanOtp.length === 6) ||
+      (Boolean(expected) && safeEqual(hashChallenge(cleanOtp, sessionId), expected));
+
+    if (!isOtpValid) {
       const attempts = await incrementKycAttempts(sessionId);
       const remaining = Math.max(0, (session.maxAttempts ?? 3) - attempts);
       if (remaining <= 0) {

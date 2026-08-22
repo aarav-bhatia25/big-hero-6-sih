@@ -193,13 +193,13 @@ export default function OnboardingPage() {
                 <div>
                   <label className="text-sm font-semibold">Full name (as on Aadhaar)</label>
                   <input value={fullName} onChange={(e) => setFullName(e.target.value)} required
-                    className="mt-1 w-full rounded-nb border-2 border-line px-3 py-2.5 text-sm outline-none focus:border-brand-500"
+                    className="nb-input mt-1 text-sm font-semibold"
                     placeholder="Ralston Fernandes" />
                 </div>
                 <div>
                   <label className="text-sm font-semibold">Aadhaar number</label>
                   <input value={aadhaar} onChange={(e) => setAadhaar(e.target.value)} required inputMode="numeric"
-                    className="mt-1 w-full rounded-nb border-2 border-line px-3 py-2.5 font-mono text-sm outline-none focus:border-brand-500"
+                    className="nb-input mt-1 font-mono text-sm"
                     placeholder="XXXX XXXX XXXX" maxLength={14} />
                   <p className="mt-1.5 text-xs text-ink-soft">
                     Validated with the Verhoeff checksum. Never stored — only a salted hash is kept.
@@ -215,13 +215,13 @@ export default function OnboardingPage() {
                 <div>
                   <label className="text-sm font-semibold">Passport MRZ — line 1</label>
                   <input value={mrz1} onChange={(e) => setMrz1(e.target.value)} required
-                    className="mt-1 w-full rounded-nb border-2 border-line px-3 py-2.5 font-mono text-xs uppercase outline-none focus:border-brand-500"
+                    className="nb-input mt-1 font-mono text-xs uppercase"
                     placeholder="P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<" />
                 </div>
                 <div>
                   <label className="text-sm font-semibold">Passport MRZ — line 2</label>
                   <input value={mrz2} onChange={(e) => setMrz2(e.target.value)} required
-                    className="mt-1 w-full rounded-nb border-2 border-line px-3 py-2.5 font-mono text-xs uppercase outline-none focus:border-brand-500"
+                    className="nb-input mt-1 font-mono text-xs uppercase"
                     placeholder="L898902C36UTO7408122F3404159ZE184226B<<<<<16" />
                 </div>
                 <p className="text-xs text-ink-soft">
@@ -275,7 +275,7 @@ export default function OnboardingPage() {
 
             <input value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))} required
               inputMode="numeric" maxLength={6}
-              className="w-full rounded-nb border-2 border-line px-3 py-3 text-center font-mono text-2xl tracking-[0.4em] outline-none focus:border-brand-500"
+              className="nb-input w-full text-center font-mono text-2xl tracking-[0.4em]"
               placeholder="000000" />
             <p className="text-xs text-ink-soft">Expires in 10 minutes. Three incorrect attempts locks the session.</p>
 
@@ -303,12 +303,12 @@ export default function OnboardingPage() {
             <h2 className="pt-1 font-bold">Emergency contact <span className="font-normal text-ink-soft">(optional)</span></h2>
             <div className="grid gap-3 sm:grid-cols-2">
               <input value={contactName} onChange={(e) => setContactName(e.target.value)} placeholder="Contact name"
-                className="rounded-nb border-2 border-line px-3 py-2.5 text-sm outline-none focus:border-brand-500" />
+                className="nb-input text-sm" />
               <input value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} placeholder="+91 98765 43210"
-                className="rounded-nb border-2 border-line px-3 py-2.5 text-sm outline-none focus:border-brand-500" />
+                className="nb-input text-sm" />
             </div>
             <input value={hotel} onChange={(e) => setHotel(e.target.value)} placeholder="Accommodation (optional)"
-              className="w-full rounded-nb border-2 border-line px-3 py-2.5 text-sm outline-none focus:border-brand-500" />
+              className="nb-input text-sm" />
 
             <label className="flex cursor-pointer items-start gap-3 rounded-nb border-2 border-line bg-surface-2 p-4">
               <input type="checkbox" checked={trackingConsent} onChange={(e) => setTrackingConsent(e.target.checked)}

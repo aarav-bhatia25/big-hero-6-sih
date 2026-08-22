@@ -3,6 +3,8 @@ import { getUserByEmail, upsertUser } from '@/lib/db';
 import { hashPassword, verifyPassword } from '@/lib/auth/crypto';
 import { createSessionToken, setSessionCookie } from '@/lib/auth/session';
 
+export const dynamic = 'force-dynamic';
+
 // Built-in seed accounts fallback for instant access / bootstrap
 const DEFAULT_FALLBACK_STAFF = [
   {

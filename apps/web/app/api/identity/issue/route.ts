@@ -16,10 +16,6 @@ function makeTouristId(nationalityCode: string, subjectHash: string): string {
 }
 
 export async function POST(request: NextRequest) {
-  if (!isSupabaseConfigured) {
-    return NextResponse.json({ ok: false, error: "Database not configured." }, { status: 503 });
-  }
-
   try {
     const { sessionId, otp, emergencyContacts, accommodation, trackingConsent } = await request.json();
     if (!sessionId) {

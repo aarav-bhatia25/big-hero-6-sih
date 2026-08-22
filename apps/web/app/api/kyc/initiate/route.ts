@@ -5,9 +5,6 @@ import { isSupabaseConfigured } from "@/lib/db";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
-  if (!isSupabaseConfigured) {
-    return NextResponse.json({ ok: false, error: "Database not configured." }, { status: 503 });
-  }
   try {
     const body = await request.json();
     const method = body.method === "passport" ? "passport" : "aadhaar";

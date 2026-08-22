@@ -36,6 +36,30 @@ function LoginFormContent() {
   const [touristLoading, setTouristLoading] = useState(false);
   const [touristError, setTouristError] = useState<string | null>(null);
 
+  const applyTouristPreset = async (presetId: string) => {
+    setTouristIdentifier(presetId);
+    setTouristLoading(true);
+    setTouristError(null);
+    try {
+      const res = await fetch('/api/auth/tourist-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: presetId }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        setTouristError(data.error || 'Identity lookup failed.');
+        return;
+      }
+      router.push((redirect || '/citizen') as any);
+      router.refresh();
+    } catch (err: any) {
+      setTouristError(err.message || 'Connection error. Please try again.');
+    } finally {
+      setTouristLoading(false);
+    }
+  };
+
   const applyStaffPreset = (presetEmail: string, presetPass: string) => {
     setEmail(presetEmail);
     setPassword(presetPass);
@@ -214,9 +238,10 @@ function LoginFormContent() {
                   {touristLoading ? 'Validating DID...' : 'Verify DID & Open Safety Hub →'}
                 </button>
                 <div className="pt-4 border-t-2 border-line space-y-3">
-                  <button type="button" onClick={() => setTouristIdentifier('TOUR-7890')}
+                  <button type="button" onClick={() => applyTouristPreset('TOUR-7890')}
+                    disabled={touristLoading}
                     className="nb-btn nb-btn-ghost !border-2 w-full text-xs font-mono">
-                    Quick demo tourist: <strong>TOUR-7890 (Ralston)</strong>
+                    {touristLoading ? 'Verifying DEMO DID...' : <>Quick demo tourist: <strong>TOUR-7890 (Ralston)</strong></>}
                   </button>
                   <div className="text-center pt-1">
                     <Link href="/onboarding" className="text-ink-soft hover:text-accent transition inline-flex items-center gap-1.5 text-xs font-bold">
