@@ -8,6 +8,8 @@
 -- double-quote these names, e.g.  select "touristId" from tourists;
 
 -- Idempotent: safe to re-run.
+drop table if exists credential_issuance cascade;
+drop table if exists kyc_sessions cascade;
 drop table if exists incidents cascade;
 drop table if exists locations cascade;
 drop table if exists geofences cascade;
@@ -27,6 +29,7 @@ create table tourists (
   "issueDate"         text,
   "emergencyContacts" jsonb default '[]'::jsonb,
   accommodation       jsonb default '{}'::jsonb,
+  itinerary           jsonb default '{}'::jsonb,
   preferences         jsonb default '{}'::jsonb,
   "currentLocation"   jsonb,
   "clothingProfile"   jsonb,
@@ -140,4 +143,3 @@ alter table users      enable row level security;
 
 -- Deliberately no permissive policies: anon/publishable access is denied by
 -- default. Add scoped policies here when real auth is introduced.
-

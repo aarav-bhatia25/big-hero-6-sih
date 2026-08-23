@@ -13,3 +13,4 @@ cache
 typechain-types
 tmp
 *.tsbuildinfo
+.vercel

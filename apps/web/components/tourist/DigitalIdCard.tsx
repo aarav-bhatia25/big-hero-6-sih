@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { ShieldCheck, QrCode, UserCheck, FlaskConical, AlertTriangle, Link2 } from 'lucide-react';
+import Image from 'next/image';
+import { QrCode, UserCheck, FlaskConical, AlertTriangle, Link2 } from 'lucide-react';
 import { generateDigitalIdQr } from '@/lib/services/digitalId';
 
 export interface DigitalIdTourist {
@@ -47,22 +48,20 @@ export default function DigitalIdCard({ tourist }: { tourist: DigitalIdTourist |
 
   if (!tourist || !did) {
     return (
-      <div className="nb-card p-5 text-ink font-sans">
+      <section className="minimal-card p-6 text-ink">
         <div className="flex items-start gap-3">
-          <div className="p-2 rounded-nb border-2 border-line bg-warning text-ink shrink-0">
-            <AlertTriangle size={18} />
-          </div>
+          <AlertTriangle className="mt-0.5 shrink-0 text-amber-300" size={20} />
           <div>
-            <h3 className="font-black text-lg">No credential issued yet</h3>
-            <p className="text-sm text-ink-soft mt-1">
+            <h3 className="text-lg font-semibold">No credential issued yet</h3>
+            <p className="mt-1 text-sm text-ink-soft">
               Complete identity verification to receive a Digital Tourist ID.
             </p>
-            <a href="/onboarding" className="nb-btn nb-btn-accent mt-3 text-xs">
+            <a href="/onboarding" className="minimal-button minimal-button-primary mt-4 text-sm">
               Start verification →
             </a>
           </div>
         </div>
-      </div>
+      </section>
     );
   }
 
@@ -71,46 +70,41 @@ export default function DigitalIdCard({ tourist }: { tourist: DigitalIdTourist |
   const anchor = tourist.anchorTxHash ? chainLabel(tourist.anchorChainId) : null;
 
   return (
-    <div className="nb-card p-5 text-ink font-sans relative">
-      <div className="flex flex-wrap items-center justify-between border-b-2 border-line pb-3.5 mb-4 gap-2">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-accent text-accent-ink rounded-nb border-2 border-line">
-            <ShieldCheck className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="font-black text-ink text-lg tracking-tight">
-                Digital Tourist Identity Permit
+    <section className="minimal-card relative p-6 text-ink">
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3 border-b border-line pb-4">
+        <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-xl font-semibold tracking-tight text-ink">
+                Digital Tourist ID
               </h3>
               {revoked ? (
-                <span className="nb-chip bg-danger text-white">{tourist.credentialStatus}</span>
+                <span className="rounded-full bg-red-500/15 px-2.5 py-1 text-xs font-semibold text-red-300">{tourist.credentialStatus}</span>
               ) : (
-                <span className="nb-chip" style={{ background: '#15a34a', color: '#fff' }}>
-                  <UserCheck className="w-3 h-3" /> VERIFIED
+                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs font-semibold text-emerald-300">
+                  <UserCheck className="size-3.5" /> Verified
                 </span>
               )}
             </div>
-            <p className="text-xs font-mono text-ink-soft mt-0.5 break-all">REF ID: {did}</p>
-          </div>
+            <p className="mt-1 break-all font-mono text-xs text-ink-soft">{did}</p>
         </div>
 
-        <button onClick={() => setShowQr(!showQr)} className="nb-btn nb-btn-accent text-xs">
+        <button onClick={() => setShowQr(!showQr)} className="minimal-button minimal-button-primary text-sm">
           <QrCode className="w-4 h-4" />
-          {showQr ? 'Hide Official QR' : 'Show Official QR'}
+          {showQr ? 'Hide QR' : 'Show QR'}
         </button>
       </div>
 
       {isSandbox && (
-        <div className="flex items-center gap-2 mb-3 px-3 py-2 nb-inset text-[11px]" style={{ background: 'var(--nb-accent-soft)' }}>
+        <div className="mb-3 flex items-center gap-2 rounded-lg border border-sky-400/30 bg-sky-400/10 px-3 py-2 text-xs text-ink-soft">
           <FlaskConical className="w-3.5 h-3.5 shrink-0" />
           <span>Issued by a simulated verification provider — not a government-recognised credential.</span>
         </div>
       )}
 
-      {anchor && (
-        <div className="flex flex-wrap items-center gap-2 mb-3 px-3 py-2 nb-inset text-[11px]">
+      {anchor ? (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-line bg-surface-2 px-3 py-3 text-xs">
           <Link2 className="w-3.5 h-3.5 shrink-0 text-success" />
-          <span className="font-bold">Anchored on-chain</span>
+          <span className="font-semibold text-ink">Anchored on-chain</span>
           <span className="text-ink-soft">· {anchor.name} · credential hash immutably recorded</span>
           {anchor.explorer ? (
             <a href={`${anchor.explorer}${tourist.anchorTxHash}`} target="_blank" rel="noopener noreferrer"
@@ -122,13 +116,19 @@ export default function DigitalIdCard({ tourist }: { tourist: DigitalIdTourist |
               tx {tourist.anchorTxHash!.slice(0, 10)}…{tourist.anchorTxHash!.slice(-8)}
             </span>
           )}
+          <span className="w-full text-ink-soft">No personal wallet was connected: this anchor was submitted by the Prahari server wallet.</span>
+        </div>
+      ) : (
+        <div className="mb-3 flex items-start gap-2 rounded-lg border border-line bg-surface-2 px-3 py-3 text-xs">
+          <Link2 className="w-3.5 h-3.5 shrink-0 text-ink-soft" />
+          <span><strong>Blockchain anchor not recorded.</strong> Your credential remains signed and verifiable, but an on-chain registry must be configured before a server anchor can be created.</span>
         </div>
       )}
 
       {showQr ? (
-        <div className="flex flex-col items-center justify-center p-4 nb-inset my-2 text-ink">
+        <div className="my-2 flex flex-col items-center justify-center rounded-xl border border-line bg-surface-2 p-5 text-ink">
           {qrCodeUrl ? (
-            <img src={qrCodeUrl} alt="Digital Tourist ID QR Code" className="w-44 h-44 object-contain bg-white p-2 rounded-nb border-2 border-line" />
+            <Image src={qrCodeUrl} alt="Digital Tourist ID QR Code" width={176} height={176} unoptimized className="h-44 w-44 object-contain rounded-nb border-2 border-line bg-white p-2" />
           ) : (
             <div className="w-44 h-44 flex items-center justify-center text-ink-soft text-xs">Generating QR...</div>
           )}
@@ -141,32 +141,32 @@ export default function DigitalIdCard({ tourist }: { tourist: DigitalIdTourist |
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-          <Field label="PERMIT HOLDER" value={tourist.name} />
-          <Field label="TOURIST SERIAL NO." value={tourist.touristId} mono />
-          <Field label="NATIONALITY / ORIGIN" value={tourist.nationality} />
-          <div className="nb-inset p-3">
-            <span className="text-[10px] text-ink-soft font-mono uppercase tracking-wider block font-bold mb-0.5">
-              KYC STATUS
+        <div className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
+          <Field label="Holder" value={tourist.name} />
+          <Field label="Tourist ID" value={tourist.touristId} mono />
+          <Field label="Nationality" value={tourist.nationality} />
+          <div className="rounded-lg border border-line bg-surface-2 p-3">
+            <span className="mb-1 block text-xs text-ink-soft">
+              Verification
             </span>
-            <span className="font-bold text-success text-sm flex items-center gap-1">
+            <span className="flex items-center gap-1 text-sm font-medium text-emerald-300">
               <UserCheck className="w-3.5 h-3.5" />
               {tourist.kycMethod === 'passport' ? 'Passport MRZ' : 'Aadhaar'} verified
             </span>
           </div>
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
 function Field({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
-    <div className="nb-inset p-3">
-      <span className="text-[10px] text-ink-soft font-mono uppercase tracking-wider block font-bold mb-0.5">
+    <div className="rounded-lg border border-line bg-surface-2 p-3">
+      <span className="mb-1 block text-xs text-ink-soft">
         {label}
       </span>
-      <span className={`font-bold text-ink text-sm ${mono ? 'font-mono' : ''}`}>{value}</span>
+      <span className={`text-sm font-medium text-ink ${mono ? 'font-mono' : ''}`}>{value}</span>
     </div>
   );
 }

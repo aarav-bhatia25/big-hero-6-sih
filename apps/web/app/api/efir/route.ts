@@ -1,63 +1,132 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { listIncidentsWithEfir, upsertIncident, listIncidents, updateIncident } from '@/lib/db';
+import { listIncidentsWithEfir, upsertIncident, listIncidents, updateIncident, getTourist } from '@/lib/db';
 import { emitToGateway } from '@/lib/services/gatewayEmit';
-import { requireAuth } from '@/lib/auth/guards';
+import { canAccessTouristData, requireAuth } from '@/lib/auth/guards';
+import { anchorEfirEvidence, verifyEfirEvidence } from '@/lib/blockchain/incidentEvidence';
+import { operationalIncidents } from '@/lib/operationalData';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   const auth = await requireAuth(request, ['tourist', 'authority', 'admin', 'responder']);
-  const session = auth.session || { touristId: 'TOUR-7890', name: 'Ralston (Demo Tourist)', role: 'tourist' };
+  if (auth.errorResponse) return auth.errorResponse;
+  const { session } = auth;
 
   try {
     const body = await request.json().catch(() => ({}));
     const {
       incidentId,
-      touristId = session.touristId || 'TOUR-7890',
-      touristName = session.name || 'Ralston (Demo Tourist)',
-      passportAadhaar = 'IND-P892100',
-      incidentType = 'SOS Panic Trigger',
-      location = { lat: 19.0760, lng: 72.8777, address: 'Vasai-Mira Travel Corridor, Maharashtra' },
-      clothingProfile = 'Black Jacket, Dark Blue Jeans, Grey Boots',
-      emergencyContact = 'Ananya Sharma (+91 98765 43210)',
+      passportAadhaar,
+      incidentType = 'E-FIR report',
+      location,
+      clothingProfile,
+      emergencyContact,
+      occurrenceAt,
+      narrative,
+      reportLanguage = 'English',
+      incidentCategory,
+      suspectDescription = '',
+      witnesses = [],
+      stolenItems = [],
+      injuries = '',
+      evidence = [],
+      callbackNumber,
+      declarationAccepted = false,
     } = body;
 
-    const efirId = `EFIR-${Date.now()}`;
+    const touristId = body.touristId ?? session.touristId;
+    const touristName = body.touristName ?? session.name;
+
+    if (!touristId) {
+      return NextResponse.json({ success: false, error: 'An authenticated tourist identity is required.' }, { status: 400 });
+    }
+
+    if (!canAccessTouristData(session, touristId)) {
+      return NextResponse.json({ success: false, error: 'You can only file an E-FIR for your own identity.' }, { status: 403 });
+    }
+    if (!location || !Number.isFinite(location.lat) || !Number.isFinite(location.lng)) {
+      return NextResponse.json({ success: false, error: 'A valid incident location is required.' }, { status: 400 });
+    }
+    if (typeof narrative !== 'string' || narrative.trim().length < 20) {
+      return NextResponse.json({ success: false, error: 'Please provide at least 20 characters describing what happened.' }, { status: 400 });
+    }
+    if (!declarationAccepted) {
+      return NextResponse.json({ success: false, error: 'The truthfulness declaration must be accepted before submission.' }, { status: 400 });
+    }
+
+    const tourist = await getTourist(touristId);
+    if (!tourist) {
+      return NextResponse.json({ success: false, error: 'Tourist record not found.' }, { status: 404 });
+    }
+    const storedContact = tourist?.emergencyContacts?.[0];
+    const contact = emergencyContact
+      ? String(emergencyContact).slice(0, 200)
+      : storedContact
+        ? `${storedContact.name ?? 'Not supplied'}${storedContact.phone ? ` (${storedContact.phone})` : ''}`
+        : 'Not supplied';
+    const reportedAt = new Date().toISOString();
+    const normalizedWitnesses = Array.isArray(witnesses)
+      ? witnesses.slice(0, 5).map((w: any) => ({ name: String(w?.name ?? '').slice(0, 120), contact: String(w?.contact ?? '').slice(0, 80), statement: String(w?.statement ?? '').slice(0, 1000) }))
+      : [];
+    const normalizedEvidence = Array.isArray(evidence)
+      ? evidence.slice(0, 10).map((item: any) => ({ type: String(item?.type ?? 'other').slice(0, 40), reference: String(item?.reference ?? '').slice(0, 500), description: String(item?.description ?? '').slice(0, 1000) }))
+      : [];
+
+    const efirId = `EFIR-${new Date().getUTCFullYear()}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
     const draftEfIR = {
       efirId,
       incidentId: incidentId || `INC-${Math.floor(1000 + Math.random() * 9000)}`,
       touristId,
-      touristName,
-      passportAadhaar,
+      touristName: tourist.name ?? touristName ?? touristId,
+      passportAadhaar: passportAadhaar ? String(passportAadhaar).slice(0, 120) : null,
       incidentType,
       location,
       clothingProfile,
-      emergencyContact,
-      status: 'DRAFT_GENERATED',
+      emergencyContact: contact,
+      callbackNumber: callbackNumber || null,
+      occurrenceAt: occurrenceAt || null,
+      reportedAt,
+      reportLanguage,
+      incidentCategory: incidentCategory || incidentType,
+      narrative: narrative.trim(),
+      suspectDescription: String(suspectDescription).slice(0, 2000),
+      witnesses: normalizedWitnesses,
+      stolenItems: Array.isArray(stolenItems) ? stolenItems.slice(0, 20) : [],
+      injuries: String(injuries).slice(0, 2000),
+      evidence: normalizedEvidence,
+      declarationAccepted: true,
+      status: 'SUBMITTED_FOR_REVIEW',
       policeVerification: 'PENDING_OFFICER_APPROVAL',
-      createdAt: new Date().toISOString(),
+      createdAt: reportedAt,
+      auditTrail: [{ event: 'SUBMITTED', at: reportedAt, actor: session.name, actorRole: session.role }],
     };
 
     // Attach the draft to the incident, creating a stub incident if absent.
     const existing = (await listIncidents(100)).find(
       (i: any) => i.incidentId === draftEfIR.incidentId
     );
-    await upsertIncident({
+    if (!await upsertIncident({
       ...(existing ?? {
         incidentId: draftEfIR.incidentId,
         touristId,
-        touristName,
+        touristName: draftEfIR.touristName,
         type: 'SOS',
         status: 'new',
         location,
         severity: 'critical',
       }),
       efirDraft: draftEfIR,
-    });
+      timeline: [
+        ...((existing?.timeline as any[]) ?? []),
+        { event: 'E-FIR submitted for officer review', at: reportedAt, actor: session.name },
+      ],
+    })) {
+      return NextResponse.json({ success: false, error: 'The E-FIR could not be saved for officer review.' }, { status: 503 });
+    }
 
     return NextResponse.json({
       success: true,
-      message: 'Automated E-FIR draft successfully generated and queued for officer verification.',
+      message: 'E-FIR submitted and queued for officer verification.',
       efir: draftEfIR,
     });
   } catch (err: any) {
@@ -70,7 +139,13 @@ export async function GET(request: NextRequest) {
   if (auth.errorResponse) return auth.errorResponse;
 
   try {
-    const incidentsWithEfir = await listIncidentsWithEfir();
+    const incidentId = new URL(request.url).searchParams.get('incidentId');
+    if (incidentId) {
+      const incident = operationalIncidents(await listIncidents(200)).find((item: any) => item.incidentId === incidentId && item.efirDraft);
+      if (!incident) return NextResponse.json({ success: false, error: 'E-FIR not found.' }, { status: 404 });
+      return NextResponse.json({ success: true, evidence: await verifyEfirEvidence(incidentId, incident.efirDraft) });
+    }
+    const incidentsWithEfir = operationalIncidents(await listIncidentsWithEfir());
 
     return NextResponse.json({ success: true, efirs: incidentsWithEfir.map((i) => ({ ...i.efirDraft, _incidentId: i.incidentId })) });
   } catch (err: any) {
@@ -107,7 +182,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     // Find the incident with the E-FIR draft
-    const allIncidents = await listIncidents(200);
+    const allIncidents = operationalIncidents(await listIncidents(200));
     const incident = allIncidents.find((i: any) => i.incidentId === incidentId && i.efirDraft);
 
     if (!incident) {
@@ -118,17 +193,37 @@ export async function PATCH(request: NextRequest) {
     }
 
     const now = new Date().toISOString();
-    const updatedDraft = {
+    const event = action === 'APPROVE' ? 'OFFICER_VERIFIED' : 'REJECTED';
+    const draftForAnchor = {
       ...incident.efirDraft,
       policeVerification: action === 'APPROVE' ? 'OFFICER_VERIFIED' : 'REJECTED',
       status: action === 'APPROVE' ? 'OFFICER_VERIFIED' : 'REJECTED',
       verifiedAt: now,
       verifiedBy: officerName || 'Authority Officer',
       officerBadge: officerBadge || null,
-      remarks: remarks || null,
+      remarks: remarks ? String(remarks).slice(0, 2000) : null,
+      auditTrail: [
+        ...(incident.efirDraft.auditTrail ?? []),
+        { event, at: now, actor: officerName || 'Authority Officer', actorBadge: officerBadge || null, remarks: remarks ? String(remarks).slice(0, 2000) : null },
+      ],
+    };
+    const anchor = action === 'APPROVE' ? await anchorEfirEvidence(incidentId, draftForAnchor) : null;
+    const updatedDraft = {
+      ...draftForAnchor,
+      blockchainEvidence: anchor
+        ? { status: 'ANCHORED', ...anchor }
+        : action === 'APPROVE'
+          ? { status: 'PENDING_ANCHOR', attemptedAt: now }
+          : incident.efirDraft.blockchainEvidence ?? null,
     };
 
-    const updated = await updateIncident(incidentId, { efirDraft: updatedDraft });
+    const updated = await updateIncident(incidentId, {
+      efirDraft: updatedDraft,
+      timeline: [
+        ...(incident.timeline ?? []),
+        { event: `E-FIR ${action === 'APPROVE' ? 'verified' : 'rejected'}`, at: now, actor: officerName || 'Authority Officer', remarks: remarks || null },
+      ],
+    });
 
     if (!updated) {
       return NextResponse.json(
@@ -137,15 +232,15 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
-    emitToGateway('incident:update', { incidentId, efirDraft: updatedDraft });
+    await emitToGateway('incident:update', { incidentId, efirDraft: updatedDraft });
 
     return NextResponse.json({
       success: true,
       message: `E-FIR ${action === 'APPROVE' ? 'approved' : 'rejected'} by ${officerName || 'Authority Officer'}`,
       efir: updatedDraft,
+      blockchain: updatedDraft.blockchainEvidence,
     });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
-

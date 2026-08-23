@@ -1,38 +1,51 @@
-import { io, Socket } from "socket.io-client";
-
-let serverSocket: Socket | null = null;
-
 /**
- * Best-effort fire-and-forget emit from a Next.js API route to the
- * Socket.IO realtime gateway running on :3001.
+ * Publishes an operational event through Supabase's Realtime Broadcast API.
+ * This is best-effort: a delivery failure must not make the SOS, location, or
+ * E-FIR mutation fail after it has been stored.
  *
- * This is intentionally non-blocking: if the gateway is down the emit
- * silently fails and the REST response is still returned to the caller.
+ * Calling the REST Broadcast API directly avoids the database Broadcast
+ * replication slot and daily-partition lifecycle. Browser sessions can still
+ * subscribe only when their short-lived staff JWT passes the private-channel
+ * RLS policy on `realtime.messages`.
  */
-export function emitToGateway(event: string, payload: unknown): void {
-  try {
-    if (!serverSocket) {
-      const url = process.env.SOCKET_URL ?? "http://localhost:3001";
-      serverSocket = io(url, {
-        autoConnect: true,
-        reconnection: false,        // API routes are short-lived; don't retry
-        transports: ["websocket"],
-        timeout: 1500,
-      });
-    }
+export type RealtimeDeliveryResult = {
+  attempted: boolean;
+  accepted: boolean;
+};
 
-    if (serverSocket.connected) {
-      serverSocket.emit(event, payload);
-    } else {
-      // Queue the emit for when the socket connects (fires within ~100ms)
-      serverSocket.once("connect", () => {
-        serverSocket!.emit(event, payload);
-      });
-      if (serverSocket.disconnected) {
-        serverSocket.connect();
+export async function emitToGateway(event: string, payload: unknown): Promise<RealtimeDeliveryResult> {
+  const projectUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const broadcastEvent = {
+    "incident:create": "incident:created",
+    "incident:update": "incident:updated",
+    "tourist:location": "tourist:location",
+  }[event] ?? event;
+
+  if (!projectUrl || !serviceRoleKey) return { attempted: false, accepted: false };
+
+  try {
+    const topic = encodeURIComponent("prahari:live");
+    const eventName = encodeURIComponent(broadcastEvent);
+    const response = await fetch(
+      `${projectUrl}/realtime/v1/api/broadcast/${topic}/events/${eventName}?private=true`,
+      {
+        method: "POST",
+        headers: {
+          apikey: serviceRoleKey,
+          Authorization: `Bearer ${serviceRoleKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(2_000),
       }
+    );
+    if (!response.ok) {
+      console.warn(`[prahari] Realtime Broadcast API rejected HTTP ${response.status}.`);
     }
+    return { attempted: true, accepted: response.ok };
   } catch {
-    // Gateway unreachable — not critical, dashboard will pick up on next poll
+    // Realtime is an enhancement; the durable API write has already succeeded.
+    return { attempted: true, accepted: false };
   }
 }

@@ -38,6 +38,7 @@ const getResponderIcon = () =>
 
 interface ClientMapInnerProps {
   touristPos?: { lat: number; lng: number } | null;
+  liveTourists?: Array<{ touristId: string; lat: number; lng: number; timestamp?: string }>;
   geofences?: Array<{
     id: string;
     name: string;
@@ -84,9 +85,6 @@ function FitToData({ points }: { points: Array<[number, number]> }) {
   return null;
 }
 
-// Jaipur — matches the seeded dataset; only used when there is nothing to show.
-const FALLBACK_CENTER: [number, number] = [26.9124, 75.7873];
-
 // Helper to extract and normalize coordinates into Leaflet [lat, lng] array
 function normalizePolygonCoords(gf: any): Array<[number, number]> {
   let raw = gf.coordinates || gf.geometry?.coordinates || [];
@@ -111,59 +109,9 @@ function normalizePolygonCoords(gf: any): Array<[number, number]> {
   });
 }
 
-const DEFAULT_FALLBACK_GEOFENCES = [
-  {
-    id: 'gf-mumbai-1',
-    name: 'Mira-Bhayander High Risk Coastal Zone',
-    severity: 'critical',
-    coordinates: [
-      [19.26, 72.82],
-      [19.31, 72.82],
-      [19.31, 72.88],
-      [19.26, 72.88],
-      [19.26, 72.82],
-    ] as Array<[number, number]>,
-  },
-  {
-    id: 'gf-mumbai-2',
-    name: 'Sanjay Gandhi National Park Restricted Boundary',
-    severity: 'high',
-    coordinates: [
-      [19.20, 72.87],
-      [19.26, 72.87],
-      [19.26, 72.94],
-      [19.20, 72.94],
-      [19.20, 72.87],
-    ] as Array<[number, number]>,
-  },
-  {
-    id: 'gf-jaipur-1',
-    name: 'Pink City Central Safe Zone',
-    severity: 'low',
-    coordinates: [
-      [26.91, 75.78],
-      [26.95, 75.78],
-      [26.95, 75.83],
-      [26.91, 75.83],
-      [26.91, 75.78],
-    ] as Array<[number, number]>,
-  },
-  {
-    id: 'gf-jaipur-2',
-    name: 'Nahargarh Cliff High Risk Area',
-    severity: 'high',
-    coordinates: [
-      [26.935, 75.81],
-      [26.948, 75.81],
-      [26.948, 75.825],
-      [26.935, 75.825],
-      [26.935, 75.81],
-    ] as Array<[number, number]>,
-  },
-];
-
 export default function ClientMapInner({
   touristPos = null,
+  liveTourists = [],
   geofences = [],
   incidents = [],
   responders = [],
@@ -172,10 +120,13 @@ export default function ClientMapInner({
   const incidentIcon = React.useMemo(() => getIncidentIcon(), []);
   const responderIcon = React.useMemo(() => getResponderIcon(), []);
 
-  const activeGeofences = geofences.length > 0 ? geofences : DEFAULT_FALLBACK_GEOFENCES;
+  const activeGeofences = geofences;
 
   const points: Array<[number, number]> = [
     ...(touristPos ? [[touristPos.lat, touristPos.lng] as [number, number]] : []),
+    ...liveTourists
+      .filter((tourist) => typeof tourist.lat === 'number' && typeof tourist.lng === 'number')
+      .map((tourist) => [tourist.lat, tourist.lng] as [number, number]),
     ...incidents
       .filter((i) => typeof i.lat === 'number' && typeof i.lng === 'number')
       .map((i) => [i.lat, i.lng] as [number, number]),
@@ -185,10 +136,21 @@ export default function ClientMapInner({
     ...activeGeofences.flatMap((g) => normalizePolygonCoords(g)),
   ];
 
-  const [centerLat, centerLng] = points[0] ?? FALLBACK_CENTER;
+  if (points.length === 0) {
+    return (
+      <div className="flex h-[420px] w-full items-center justify-center rounded-xl border border-slate-700/70 bg-slate-900/40 px-6 text-center text-sm text-slate-400">
+        <div>
+          <p className="font-medium text-slate-200">No live spatial data yet</p>
+          <p className="mt-2 max-w-md leading-6">The map will appear when a consented traveller shares a location, an incident includes coordinates, a responder reports a position, or an authority publishes a real geofence.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const [centerLat, centerLng] = points[0];
 
   return (
-    <div className="w-full h-[450px] rounded-2xl overflow-hidden border border-slate-800 shadow-2xl relative text-slate-900">
+    <div className="relative isolate h-[420px] w-full overflow-hidden rounded-xl border border-slate-700/70 text-slate-900">
       <MapContainer
         center={[centerLat, centerLng]}
         zoom={14}
@@ -215,6 +177,20 @@ export default function ClientMapInner({
             </Popup>
           </Marker>
         )}
+
+        {/* Authority view: each consented tourist is kept independently rather
+            than replacing one marker with the most recent socket event. */}
+        {liveTourists.map((tourist) => (
+          <Marker key={tourist.touristId} position={[tourist.lat, tourist.lng]} icon={touristIcon}>
+            <Popup>
+              <div className="text-slate-900 font-sans p-1">
+                <strong className="block text-sm font-bold">{tourist.touristId}</strong>
+                <span className="text-xs text-slate-600 font-mono">{tourist.lat.toFixed(4)}, {tourist.lng.toFixed(4)}</span>
+                {tourist.timestamp && <span className="block text-xs text-slate-500 mt-1">Updated {new Date(tourist.timestamp).toLocaleTimeString()}</span>}
+              </div>
+            </Popup>
+          </Marker>
+        ))}
 
         {/* Geofence Danger Zone Polygons */}
         {activeGeofences.map((gf) => {
@@ -273,12 +249,11 @@ export default function ClientMapInner({
         ))}
       </MapContainer>
 
-      {/* Floating Map Legend Overlay */}
-      <div className="absolute bottom-3 left-3 bg-slate-900/90 backdrop-blur-md p-2.5 rounded-xl border border-slate-700/80 text-xs flex flex-wrap items-center gap-3 z-[1000] text-slate-200 shadow-lg">
-        <span className="flex items-center gap-1 font-medium"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block"></span> Tourist</span>
-        <span className="flex items-center gap-1 font-medium"><span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block"></span> Danger Zone</span>
-        <span className="flex items-center gap-1 font-medium">SOS Incident</span>
-        <span className="flex items-center gap-1 font-medium">Responder</span>
+      <div className="absolute bottom-3 left-3 z-[1000] flex flex-wrap items-center gap-3 rounded-lg border border-slate-700/80 bg-slate-900/90 px-3 py-2 text-xs text-slate-200 backdrop-blur-md">
+        {(touristPos || liveTourists.length > 0) && <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-emerald-500" />Traveller</span>}
+        {incidents.length > 0 && <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-red-500" />Incident</span>}
+        {activeGeofences.length > 0 && <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-amber-500" />Geofence</span>}
+        {responders.length > 0 && <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-blue-500" />Responder</span>}
       </div>
     </div>
   );

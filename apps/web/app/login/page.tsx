@@ -4,7 +4,6 @@ import React, { useState, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
-  ShieldCheck,
   Building2,
   Lock,
   Mail,
@@ -13,7 +12,6 @@ import {
   QrCode,
   Smartphone,
 } from 'lucide-react';
-import ThemeToggle from '@/components/ui/ThemeToggle';
 
 function LoginFormContent() {
   const router = useRouter();
@@ -81,7 +79,7 @@ function LoginFormContent() {
         setStaffError(data.error || 'Login failed. Please verify your credentials.');
         return;
       }
-      router.push((redirect || '/admin') as any);
+      router.push((redirect || '/authority') as any);
       router.refresh();
     } catch (err: any) {
       setStaffError(err.message || 'Connection error. Please try again.');
@@ -115,43 +113,38 @@ function LoginFormContent() {
   };
 
   return (
-    <div className="min-h-screen bg-bg text-ink flex flex-col justify-between font-sans">
-      {/* Top bar */}
-      <div className="border-b-2 border-line px-4 md:px-8 py-3 flex items-center justify-between gap-2">
-        <Link href="/" className="flex items-center gap-2 font-black tracking-tight">
-          <ShieldCheck className="w-5 h-5 text-accent" /> PRAHARI
+    <div className="minimal-page min-h-screen flex flex-col justify-between font-sans">
+      <div className="minimal-nav">
+        <Link href="/" className="text-xl font-semibold tracking-tight text-ink">
+          Prahari
         </Link>
-        <ThemeToggle />
       </div>
 
       <main className="flex-1 flex items-center justify-center p-4 md:p-8">
-        <div className="w-full max-w-lg space-y-6">
-          {/* Brand */}
+        <div className="w-full max-w-md space-y-5">
           <div className="text-center space-y-2">
-            <div className="inline-flex p-3 bg-accent text-accent-ink rounded-nb border-2 border-line shadow-nb mb-1">
-              <ShieldCheck className="w-8 h-8" />
-            </div>
-            <h1 className="text-2xl md:text-3xl font-black tracking-tight text-ink">PRAHARI ACCESS PORTAL</h1>
-            <p className="text-xs text-ink-soft font-mono">
-              Role-Based Access Control • W3C Credential Verification • Govt Dispatch
-            </p>
+            <h1 className="text-3xl font-semibold tracking-tight text-ink">Sign in to Prahari</h1>
+            <p className="text-base text-ink-soft">Choose the access type that applies to you.</p>
           </div>
 
-          {/* Login Card */}
-          <div className="nb-card p-6 md:p-8 space-y-6">
+          <Link href="/onboarding" className="minimal-button minimal-button-primary w-full">
+            New traveller? Create your Digital Tourist ID <span aria-hidden>→</span>
+          </Link>
+
+          <div className="minimal-card !min-h-0 p-5 md:p-6 space-y-5">
             {/* Tabs */}
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
                 onClick={() => setActiveTab('staff')}
-                className={`nb-btn text-xs ${activeTab === 'staff' ? 'nb-btn-accent' : 'nb-btn-ghost !border-2'}`}
+                className={`minimal-button text-xs ${activeTab === 'staff' ? 'minimal-button-primary' : 'minimal-button-secondary'}`}
               >
                 <Building2 className="w-4 h-4" /> Staff &amp; Authority
               </button>
               <button
                 type="button"
                 onClick={() => setActiveTab('tourist')}
-                className={`nb-btn text-xs ${activeTab === 'tourist' ? '!bg-[#15a34a] !text-white' : 'nb-btn-ghost !border-2'}`}
+                className={`minimal-button text-xs ${activeTab === 'tourist' ? 'minimal-button-primary' : 'minimal-button-secondary'}`}
               >
                 <Smartphone className="w-4 h-4" /> Tourist &amp; Citizen
               </button>
@@ -188,22 +181,20 @@ function LoginFormContent() {
                     />
                   </div>
                 </div>
-                <button type="submit" disabled={staffLoading} className="nb-btn nb-btn-accent w-full !py-3">
-                  {staffLoading ? 'Verifying Credentials...' : 'Authenticate & Open Command Console →'}
+                <button type="submit" disabled={staffLoading} className="minimal-button minimal-button-primary w-full !py-3">
+                  {staffLoading ? 'Verifying credentials…' : 'Sign in to authority desk'}
                 </button>
 
                 {/* Presets */}
                 <div className="pt-4 border-t-2 border-line space-y-2">
-                  <span className="text-[10px] uppercase font-mono text-ink-soft block text-center font-bold">
-                    Quick demo credential presets
+                  <span className="text-[10px] uppercase tracking-wider text-ink-soft block text-center font-semibold">
+                    Demo access
                   </span>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-2 gap-2">
                     <button type="button" onClick={() => applyStaffPreset('officer.sharma@police.gov.in', 'Officer@123')}
-                      className="nb-btn nb-btn-ghost !border-2 !shadow-nb-sm text-[10px] font-mono !px-1">Authority</button>
-                    <button type="button" onClick={() => applyStaffPreset('admin@prahari.gov.in', 'Admin@123')}
-                      className="nb-btn nb-btn-ghost !border-2 !shadow-nb-sm text-[10px] font-mono !px-1">Admin</button>
+                      className="minimal-button minimal-button-secondary text-[11px] !px-1">Authority</button>
                     <button type="button" onClick={() => applyStaffPreset('unit17@dispatch.gov.in', 'Unit17@123')}
-                      className="nb-btn nb-btn-ghost !border-2 !shadow-nb-sm text-[10px] font-mono !px-1">Unit #17</button>
+                      className="minimal-button minimal-button-secondary text-[11px] !px-1">Unit #17</button>
                   </div>
                 </div>
               </form>
@@ -234,28 +225,23 @@ function LoginFormContent() {
                     Tourists verify using proof of DID credential ownership — no password required.
                   </p>
                 </div>
-                <button type="submit" disabled={touristLoading} className="nb-btn w-full !py-3" style={{ background: '#15a34a', color: '#fff' }}>
-                  {touristLoading ? 'Validating DID...' : 'Verify DID & Open Safety Hub →'}
+                <button type="submit" disabled={touristLoading} className="minimal-button minimal-button-primary w-full !py-3">
+                  {touristLoading ? 'Verifying ID…' : 'Open traveller safety hub'}
                 </button>
                 <div className="pt-4 border-t-2 border-line space-y-3">
                   <button type="button" onClick={() => applyTouristPreset('TOUR-7890')}
                     disabled={touristLoading}
-                    className="nb-btn nb-btn-ghost !border-2 w-full text-xs font-mono">
-                    {touristLoading ? 'Verifying DEMO DID...' : <>Quick demo tourist: <strong>TOUR-7890 (Ralston)</strong></>}
+                    className="minimal-button minimal-button-secondary w-full text-xs">
+                    {touristLoading ? 'Verifying demo ID…' : <>Use demo traveller: <strong>TOUR-7890</strong></>}
                   </button>
-                  <div className="text-center pt-1">
-                    <Link href="/onboarding" className="text-ink-soft hover:text-accent transition inline-flex items-center gap-1.5 text-xs font-bold">
-                      New Traveller to India? <span className="text-accent-strong font-black underline">Complete Onboarding →</span>
-                    </Link>
-                  </div>
                 </div>
               </form>
             )}
           </div>
 
-          <div className="text-center text-[11px] font-mono text-ink-soft flex items-center justify-center gap-2">
+          <div className="text-center text-[11px] text-ink-soft flex items-center justify-center gap-2">
             <Lock className="w-3.5 h-3.5" />
-            <span>Digital Personal Data Protection (DPDP) Act 2023 Aligned</span>
+            <span>Demo environment · Do not enter real identity documents</span>
           </div>
         </div>
       </main>

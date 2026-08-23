@@ -1,4 +1,0 @@
-import { Card } from "@/components/ui/card";
-import { RiskBadge } from "@/components/ui/badge";
-import { riskZones } from "@/lib/mock-data";
-export function RiskZones() { return <Card className="p-5"><h2 className="font-bold">Risk areas</h2><p className="mb-4 text-sm text-slate-500">Geofences with elevated risk</p><div className="space-y-4">{riskZones.map((zone) => <div key={zone.id}><div className="mb-2 flex items-center justify-between gap-2"><div><p className="text-sm font-semibold">{zone.name}</p><p className="text-xs text-slate-500">{zone.activeVisitors} visitors · {zone.reason}</p></div><RiskBadge level={zone.risk}/></div><div className="h-1.5 rounded-full bg-slate-100"><div className="h-full rounded-full bg-orange-400" style={{ width: `${zone.score}%` }}/></div></div>)}</div></Card>; }

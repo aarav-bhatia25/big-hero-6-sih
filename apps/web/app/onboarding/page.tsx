@@ -3,10 +3,9 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import {
-  ShieldCheck, ArrowRight, ArrowLeft, CheckCircle2, AlertTriangle,
+  ArrowRight, ArrowLeft, CheckCircle2, AlertTriangle,
   Fingerprint, BookUser, Loader2, KeyRound, FlaskConical, Copy,
 } from 'lucide-react';
-import ThemeToggle from '@/components/ui/ThemeToggle';
 
 type Method = 'aadhaar' | 'passport';
 type Step = 'method' | 'details' | 'otp' | 'consent' | 'done';
@@ -35,7 +34,14 @@ export default function OnboardingPage() {
   const [trackingConsent, setTrackingConsent] = useState(true);
   const [contactName, setContactName] = useState('');
   const [contactPhone, setContactPhone] = useState('');
+  const [contactEmail, setContactEmail] = useState('');
   const [hotel, setHotel] = useState('');
+  const [visitEndDate, setVisitEndDate] = useState(() => {
+    const date = new Date();
+    date.setDate(date.getDate() + 30);
+    return date.toISOString().slice(0, 10);
+  });
+  const [itinerarySummary, setItinerarySummary] = useState('');
 
   const [issued, setIssued] = useState<any | null>(null);
 
@@ -95,8 +101,10 @@ export default function OnboardingPage() {
         sessionId,
         otp: method === 'aadhaar' ? otp : undefined,
         trackingConsent,
-        ...(contactName && contactPhone
-          ? { emergencyContacts: [{ name: contactName, phone: contactPhone, relationship: 'Primary' }] }
+        visitEndsAt: `${visitEndDate}T23:59:59.000Z`,
+        itinerary: { summary: itinerarySummary, visitEndsAt: `${visitEndDate}T23:59:59.000Z` },
+        ...(contactPhone || contactEmail
+          ? { emergencyContacts: [{ name: contactName || 'Emergency contact', phone: contactPhone, email: contactEmail, relationship: 'Primary' }] }
           : {}),
         ...(hotel ? { accommodation: { hotelName: hotel, address: '', city: '' } } : {}),
       });
@@ -110,37 +118,34 @@ export default function OnboardingPage() {
   const stepIndex = ['method', 'details', 'otp', 'consent', 'done'].indexOf(step);
 
   return (
-    <main className="min-h-screen bg-bg px-5 py-10">
-      <div className="mx-auto max-w-2xl">
-        <div className="flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2 text-sm font-bold text-accent">
-            <ShieldCheck size={19} /> Prahari
+    <main className="minimal-page min-h-screen">
+      <header className="minimal-nav">
+          <Link href="/" className="text-xl font-semibold tracking-tight text-ink">
+            Prahari
           </Link>
-          <ThemeToggle />
-        </div>
+      </header>
+
+      <div className="mx-auto max-w-4xl px-5 pb-16 pt-7 sm:px-8 sm:pt-10">
 
         {/* Sandbox notice — must never be removed while the provider is simulated */}
-        <div className="mt-6 flex items-start gap-3 rounded-nb border border-amber-300 bg-amber-50 p-4">
-          <FlaskConical className="mt-0.5 shrink-0 text-warning" size={18} />
-          <div className="text-xs text-warning">
-            <strong className="block text-sm">Sandbox verification</strong>
-            Aadhaar checksum and passport MRZ check digits are validated for real. The
-            identity lookup itself is simulated — this is not a UIDAI authentication and
-            the credential issued is not government-recognised.
+        <div className="onboarding-notice">
+          <FlaskConical className="mt-0.5 shrink-0" size={20} />
+          <div className="text-sm leading-6">
+            <strong className="block font-semibold">Demo verification</strong>
+            Aadhaar checksum and passport MRZ check digits are checked locally. Identity lookup is simulated; this is not UIDAI authentication and the credential is not government-recognised.
           </div>
         </div>
 
-        <div className="mt-8 text-center">
-          <span className="text-sm font-bold text-brand-600">DIGITAL TOURIST ID</span>
-          <h1 className="mt-2 text-3xl font-bold">Travel safer, on your terms.</h1>
-          <p className="mx-auto mt-3 max-w-xl text-ink-soft">
+        <div className="mt-10 text-center">
+          <h1 className="text-4xl font-semibold tracking-tight text-ink">Travel safer, on your terms.</h1>
+          <p className="mx-auto mt-4 max-w-2xl text-base leading-7 text-ink-soft">
             Create a consent-based, verifiable tourist credential. Your personal
             information is shared only when you authorise it or during an active emergency.
           </p>
         </div>
 
         {/* Progress */}
-        <div className="mt-8 flex items-center gap-2">
+        <div className="mx-auto mt-10 flex max-w-3xl items-center gap-2">
           {['Identity', 'Verify', 'Consent', 'Issued'].map((label, i) => {
             const reached = (step === 'otp' ? 1 : stepIndex > 1 ? stepIndex - 1 : stepIndex) >= i;
             return (
@@ -164,7 +169,7 @@ export default function OnboardingPage() {
 
         {/* STEP 1 — method */}
         {step === 'method' && (
-          <div className="mt-6 grid gap-4 sm:grid-cols-2">
+          <div className="mt-8 grid gap-5 sm:grid-cols-2">
             {([
               { id: 'aadhaar' as const, icon: Fingerprint, title: 'Indian citizen', sub: 'Verify with Aadhaar + OTP' },
               { id: 'passport' as const, icon: BookUser, title: 'Foreign national', sub: 'Verify with passport MRZ' },
@@ -172,12 +177,14 @@ export default function OnboardingPage() {
               <button
                 key={id}
                 onClick={() => { setMethod(id); setStep('details'); setError(null); }}
-                className="rounded-nb border-2 border-line bg-surface p-6 text-left transition hover:border-brand-500 hover:shadow-nb"
+                className="minimal-card minimal-card-link p-8 text-left"
               >
-                <Icon className="text-brand-600" size={26} />
-                <h2 className="mt-4 font-bold">{title}</h2>
-                <p className="mt-1 text-sm text-ink-soft">{sub}</p>
-                <span className="mt-4 inline-flex items-center gap-1 text-sm font-bold text-brand-600">
+                <div className="flex items-center gap-3">
+                  <Icon className="text-sky-400" size={25} />
+                  <h2 className="text-xl font-semibold text-ink">{title}</h2>
+                </div>
+                <p className="mt-4 text-base text-ink-soft">{sub}</p>
+                <span className="minimal-card-action">
                   Continue <ArrowRight size={15} />
                 </span>
               </button>
@@ -187,7 +194,7 @@ export default function OnboardingPage() {
 
         {/* STEP 2 — details */}
         {step === 'details' && (
-          <form onSubmit={handleInitiate} className="mt-6 space-y-4 rounded-nb border-2 border-line bg-surface p-6">
+          <form onSubmit={handleInitiate} className="minimal-card mt-8 space-y-4 p-6 sm:p-8">
             {method === 'aadhaar' ? (
               <>
                 <div>
@@ -237,12 +244,12 @@ export default function OnboardingPage() {
 
             <div className="flex gap-3 pt-2">
               <button type="button" onClick={() => { setStep('method'); setError(null); }}
-                className="flex items-center gap-1.5 rounded-nb border-2 border-line px-4 py-2.5 text-sm font-bold text-ink">
+                className="minimal-button minimal-button-secondary">
                 <ArrowLeft size={15} /> Back
               </button>
               <button type="submit" disabled={busy}
-                className="flex flex-1 items-center justify-center gap-2 rounded-nb bg-brand-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60">
-                {busy ? <Loader2 size={16} className="animate-spin" /> : <ShieldCheck size={16} />}
+                className="minimal-button minimal-button-primary flex-1 disabled:opacity-60">
+                {busy ? <Loader2 size={16} className="animate-spin" /> : <ArrowRight size={16} />}
                 {busy ? 'Verifying…' : 'Verify identity'}
               </button>
             </div>
@@ -251,7 +258,7 @@ export default function OnboardingPage() {
 
         {/* STEP 3 — OTP */}
         {step === 'otp' && (
-          <form onSubmit={handleOtp} className="mt-6 space-y-4 rounded-nb border-2 border-line bg-surface p-6">
+          <form onSubmit={handleOtp} className="minimal-card mt-8 space-y-4 p-6 sm:p-8">
             <div className="flex items-center gap-3">
               <KeyRound className="text-brand-600" size={22} />
               <div>
@@ -281,11 +288,11 @@ export default function OnboardingPage() {
 
             <div className="flex gap-3 pt-1">
               <button type="button" onClick={() => { setStep('details'); setOtp(''); setError(null); }}
-                className="flex items-center gap-1.5 rounded-nb border-2 border-line px-4 py-2.5 text-sm font-bold text-ink">
+                className="minimal-button minimal-button-secondary">
                 <ArrowLeft size={15} /> Back
               </button>
               <button type="submit" disabled={busy || otp.length !== 6}
-                className="flex flex-1 items-center justify-center gap-2 rounded-nb bg-brand-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60">
+                className="minimal-button minimal-button-primary flex-1 disabled:opacity-60">
                 {busy ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
                 {busy ? 'Checking…' : 'Confirm OTP'}
               </button>
@@ -295,20 +302,32 @@ export default function OnboardingPage() {
 
         {/* STEP 4 — consent */}
         {step === 'consent' && (
-          <form onSubmit={handleIssue} className="mt-6 space-y-4 rounded-nb border-2 border-line bg-surface p-6">
+          <form onSubmit={handleIssue} className="minimal-card mt-8 space-y-4 p-6 sm:p-8">
             <div className="flex items-center gap-2 rounded-nb bg-emerald-50 px-4 py-3 text-sm font-semibold text-success">
               <CheckCircle2 size={17} /> Identity verified{fullName ? ` — ${fullName}` : ''}
             </div>
 
             <h2 className="pt-1 font-bold">Emergency contact <span className="font-normal text-ink-soft">(optional)</span></h2>
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-3 sm:grid-cols-3">
               <input value={contactName} onChange={(e) => setContactName(e.target.value)} placeholder="Contact name"
                 className="nb-input text-sm" />
               <input value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} placeholder="+91 98765 43210"
                 className="nb-input text-sm" />
+              <input type="email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} placeholder="contact@example.com"
+                className="nb-input text-sm" />
             </div>
             <input value={hotel} onChange={(e) => setHotel(e.target.value)} placeholder="Accommodation (optional)"
               className="nb-input text-sm" />
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem]">
+              <input value={itinerarySummary} onChange={(e) => setItinerarySummary(e.target.value)}
+                placeholder="Planned itinerary or destinations (optional)" className="nb-input text-sm" />
+              <label className="text-xs font-semibold text-ink-soft">
+                Visit ends
+                <input type="date" value={visitEndDate} min={new Date().toISOString().slice(0, 10)}
+                  onChange={(e) => setVisitEndDate(e.target.value)} required className="nb-input mt-1 text-sm" />
+              </label>
+            </div>
+            <p className="text-xs text-ink-soft">Your credential automatically expires when this visit ends. Itinerary details remain off-chain.</p>
 
             <label className="flex cursor-pointer items-start gap-3 rounded-nb border-2 border-line bg-surface-2 p-4">
               <input type="checkbox" checked={trackingConsent} onChange={(e) => setTrackingConsent(e.target.checked)}
@@ -323,8 +342,8 @@ export default function OnboardingPage() {
             </label>
 
             <button type="submit" disabled={busy}
-              className="flex w-full items-center justify-center gap-2 rounded-nb bg-brand-600 px-4 py-3 text-sm font-bold text-white disabled:opacity-60">
-              {busy ? <Loader2 size={16} className="animate-spin" /> : <ShieldCheck size={16} />}
+              className="minimal-button minimal-button-primary w-full disabled:opacity-60">
+              {busy ? <Loader2 size={16} className="animate-spin" /> : <ArrowRight size={16} />}
               {busy ? 'Issuing credential…' : 'Issue my Digital Tourist ID'}
             </button>
           </form>
@@ -332,7 +351,7 @@ export default function OnboardingPage() {
 
         {/* STEP 5 — done */}
         {step === 'done' && issued && (
-          <div className="mt-6 space-y-4 rounded-nb border border-emerald-300 bg-surface p-6">
+          <div className="minimal-card mt-8 space-y-4 p-6 sm:p-8">
             <div className="flex items-center gap-3">
               <div className="grid size-11 place-items-center rounded-full bg-emerald-100 text-success">
                 <CheckCircle2 size={24} />
@@ -361,13 +380,13 @@ export default function OnboardingPage() {
 
             <div className="flex flex-wrap gap-3">
               <Link href="/citizen"
-                className="flex flex-1 items-center justify-center gap-2 rounded-nb bg-brand-600 px-4 py-2.5 text-sm font-bold text-white">
+                className="minimal-button minimal-button-primary flex-1">
                 Open my safety dashboard <ArrowRight size={15} />
               </Link>
-              <a href={`/api/identity/verify/${encodeURIComponent(issued.did)}`} target="_blank" rel="noreferrer"
-                className="rounded-nb border-2 border-line px-4 py-2.5 text-sm font-bold text-ink">
+              <Link href={`/verify/${encodeURIComponent(issued.did)}`}
+                className="minimal-button minimal-button-secondary">
                 Verify credential
-              </a>
+              </Link>
             </div>
           </div>
         )}

@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic';
 
 interface MapViewProps {
   touristPos?: { lat: number; lng: number } | null;
+  liveTourists?: Array<{ touristId: string; lat: number; lng: number; timestamp?: string }>;
   geofences?: Array<{
     id: string;
     name: string;

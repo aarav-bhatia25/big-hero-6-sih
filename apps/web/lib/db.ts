@@ -1,4 +1,10 @@
 import { getSupabase } from "./supabase";
+import {
+  operationalGeofences,
+  operationalIncidents,
+  operationalResponders,
+  operationalTourists,
+} from "./operationalData";
 
 export { isSupabaseConfigured } from "./supabase";
 
@@ -41,13 +47,19 @@ const inMemoryTourists = new Map<string, Row>([
   ],
 ]);
 
+// Process-local storage is used only when no database is configured (for local
+// development). Once Supabase is configured, a database failure must never be
+// replaced with a fixture record or a pretend successful write.
+const inMemoryLocations: Row[] = [];
+const inMemoryIncidents = new Map<string, Row>();
+
 // ------------------------------------------------------------------ tourists
 export async function getTourist(touristId: string): Promise<Row | null> {
   const sb = getSupabase();
   if (!sb) return inMemoryTourists.get(touristId) ?? null;
   const { data, error } = await sb.from("tourists").select("*").eq("touristId", touristId).maybeSingle();
-  if (error) { console.warn("[prahari] getTourist:", error.message); return inMemoryTourists.get(touristId) ?? null; }
-  return data ?? inMemoryTourists.get(touristId) ?? null;
+  if (error) { console.warn("[prahari] getTourist:", error.message); return null; }
+  return data ?? null;
 }
 
 /** Matches the old `$or: [{touristId}, {did}]` lookup. */
@@ -63,11 +75,7 @@ export async function getTouristByIdOrDid(id: string): Promise<Row | null> {
     .from("tourists").select("*")
     .or(`touristId.eq.${id},did.eq.${id}`)
     .limit(1).maybeSingle();
-  if (error || !data) {
-    for (const t of inMemoryTourists.values()) {
-      if (t.touristId === id || t.did === id) return t;
-    }
-  }
+  if (error) console.warn("[prahari] getTouristByIdOrDid:", error.message);
   return data ?? null;
 }
 
@@ -80,7 +88,7 @@ export async function updateTourist(touristId: string, fields: Row): Promise<boo
     .from("tourists")
     .update({ ...fields, updatedAt: new Date().toISOString() })
     .eq("touristId", touristId);
-  if (error) { console.warn("[prahari] updateTourist:", error.message); return true; }
+  if (error) { console.warn("[prahari] updateTourist:", error.message); return false; }
   return true;
 }
 
@@ -93,14 +101,19 @@ export async function upsertTourist(row: Row): Promise<boolean> {
   const sb = getSupabase();
   if (!sb) return true;
   const { error } = await sb.from("tourists").upsert(row, { onConflict: "touristId" });
-  if (error) { console.warn("[prahari] upsertTourist:", error.message); return true; }
+  if (error) { console.warn("[prahari] upsertTourist:", error.message); return false; }
   return true;
 }
 
 // ----------------------------------------------------------------- locations
 export async function insertLocation(ping: Row): Promise<boolean> {
+  inMemoryLocations.unshift({
+    id: ping.id ?? crypto.randomUUID(),
+    createdAt: ping.createdAt ?? new Date().toISOString(),
+    ...ping,
+  });
   const sb = getSupabase();
-  if (!sb) return false;
+  if (!sb) return true;
   const { error } = await sb.from("locations").insert(ping);
   if (error) { console.warn("[prahari] insertLocation:", error.message); return false; }
   return true;
@@ -108,13 +121,19 @@ export async function insertLocation(ping: Row): Promise<boolean> {
 
 export async function listLocations(touristId: string, limit = 50): Promise<Row[]> {
   const sb = getSupabase();
-  if (!sb) return [];
+  if (!sb) return inMemoryLocations
+    .filter((location) => location.touristId === touristId)
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+    .slice(0, limit);
   const { data, error } = await sb
     .from("locations").select("*")
     .eq("touristId", touristId)
     .order("timestamp", { ascending: false })
     .limit(limit);
-  if (error) { console.warn("[prahari] listLocations:", error.message); return []; }
+  if (error) {
+    console.warn("[prahari] listLocations:", error.message);
+    return [];
+  }
   return data ?? [];
 }
 
@@ -165,26 +184,34 @@ export async function replaceResponders(rows: Row[]): Promise<boolean> {
 // ----------------------------------------------------------------- incidents
 export async function listIncidents(limit = 20): Promise<Row[]> {
   const sb = getSupabase();
-  if (!sb) return [];
+  if (!sb) return [...inMemoryIncidents.values()]
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .slice(0, limit);
   const { data, error } = await sb
     .from("incidents").select("*")
     .order("createdAt", { ascending: false })
     .limit(limit);
-  if (error) { console.warn("[prahari] listIncidents:", error.message); return []; }
+  if (error) {
+    console.warn("[prahari] listIncidents:", error.message);
+    return [];
+  }
   return data ?? [];
 }
 
 export async function insertIncident(row: Row): Promise<boolean> {
+  inMemoryIncidents.set(row.incidentId, { createdAt: new Date().toISOString(), ...row });
   const sb = getSupabase();
-  if (!sb) return false;
+  if (!sb) return true;
   const { error } = await sb.from("incidents").insert(row);
   if (error) { console.warn("[prahari] insertIncident:", error.message); return false; }
   return true;
 }
 
 export async function upsertIncident(row: Row): Promise<boolean> {
+  const existing = inMemoryIncidents.get(row.incidentId) ?? {};
+  inMemoryIncidents.set(row.incidentId, { ...existing, ...row, updatedAt: new Date().toISOString() });
   const sb = getSupabase();
-  if (!sb) return false;
+  if (!sb) return true;
   const { error } = await sb.from("incidents").upsert(row, { onConflict: "incidentId" });
   if (error) { console.warn("[prahari] upsertIncident:", error.message); return false; }
   return true;
@@ -193,9 +220,12 @@ export async function upsertIncident(row: Row): Promise<boolean> {
 /** Replaces the old `find({ efirDraft: { $exists: true } })`. */
 export async function listIncidentsWithEfir(): Promise<Row[]> {
   const sb = getSupabase();
-  if (!sb) return [];
+  if (!sb) return [...inMemoryIncidents.values()].filter((incident) => incident.efirDraft);
   const { data, error } = await sb.from("incidents").select("*").not("efirDraft", "is", null);
-  if (error) { console.warn("[prahari] listIncidentsWithEfir:", error.message); return []; }
+  if (error) {
+    console.warn("[prahari] listIncidentsWithEfir:", error.message);
+    return [];
+  }
   return data ?? [];
 }
 
@@ -221,37 +251,51 @@ export async function getDashboardStats(): Promise<DashboardStats | null> {
   const sb = getSupabase();
   if (!sb) return null;
 
-  const head = { count: "exact" as const, head: true };
-  const [tourists, incidents, zones, avail, respTotal] = await Promise.all([
-    sb.from("tourists").select("*", head),
-    // "live" = anything not yet resolved (schema allows both casings)
-    sb.from("incidents").select("*", head).not("status", "in", '("resolved","RESOLVED")'),
-    sb.from("geofences").select("*", head).eq("active", true)
-      .in("severity", ["high", "critical", "HIGH", "CRITICAL"]),
-    sb.from("responders").select("*", head).in("status", ["available", "AVAILABLE"]),
-    sb.from("responders").select("*", head),
+  const [tourists, incidents, zones, responders] = await Promise.all([
+    sb.from("tourists").select("touristId,name,identityStatus"),
+    sb.from("incidents").select("incidentId,touristId,touristName,type,status"),
+    sb.from("geofences").select("id,name,severity,active"),
+    sb.from("responders").select("id,responderId,unitId,status"),
   ]);
 
-  const err = [tourists, incidents, zones, avail, respTotal].find((r) => r.error);
+  const err = [tourists, incidents, zones, responders].find((r) => r.error);
   if (err?.error) { console.warn("[prahari] getDashboardStats:", err.error.message); return null; }
 
+  const liveIncidentStatuses = new Set(['resolved', 'cancelled', 'rejected']);
+  const visibleIncidents = operationalIncidents(incidents.data ?? []).filter(
+    (incident) => !liveIncidentStatuses.has(String(incident.status ?? '').toLowerCase())
+  );
+  const visibleZones = operationalGeofences(zones.data ?? []);
+  const visibleResponders = operationalResponders(responders.data ?? []);
+
   return {
-    activeTourists: tourists.count ?? 0,
-    liveIncidents: incidents.count ?? 0,
-    highRiskZones: zones.count ?? 0,
-    respondersAvailable: avail.count ?? 0,
-    respondersTotal: respTotal.count ?? 0,
+    activeTourists: operationalTourists(tourists.data ?? []).length,
+    liveIncidents: visibleIncidents.length,
+    highRiskZones: visibleZones.filter(
+      (zone) => ['high', 'critical'].includes(String(zone.severity ?? '').toLowerCase()) && zone.active !== false
+    ).length,
+    respondersAvailable: visibleResponders.filter(
+      (responder) => String(responder.status ?? '').toLowerCase() === 'available'
+    ).length,
+    respondersTotal: visibleResponders.length,
   };
 }
 
 /** Partial update of an incident by its business key. */
 export async function updateIncident(incidentId: string, fields: Row): Promise<Row | null> {
+  const existing = inMemoryIncidents.get(incidentId);
+  if (existing) {
+    inMemoryIncidents.set(incidentId, { ...existing, ...fields, updatedAt: new Date().toISOString() });
+  }
   const sb = getSupabase();
-  if (!sb) return null;
+  if (!sb) return inMemoryIncidents.get(incidentId) ?? null;
   const { data, error } = await sb
     .from("incidents").update(fields).eq("incidentId", incidentId).select().maybeSingle();
-  if (error) { console.warn("[prahari] updateIncident:", error.message); return null; }
-  return data;
+  if (error) {
+    console.warn("[prahari] updateIncident:", error.message);
+    return null;
+  }
+  return data ?? null;
 }
 
 // ------------------------------------------------------------- kyc sessions
@@ -289,7 +333,7 @@ export async function createKycSession(row: {
   const sb = getSupabase();
   if (!sb) return true;
   const { error } = await sb.from("kyc_sessions").insert(row);
-  if (error) { console.warn("[prahari] createKycSession:", error.message); }
+  if (error) { console.warn("[prahari] createKycSession:", error.message); return false; }
   return true;
 }
 
@@ -298,7 +342,8 @@ export async function getKycSession(sessionId: string): Promise<KycSessionRow | 
   if (!sb) return inMemoryKycSessions.get(sessionId) ?? null;
   const { data, error } = await sb
     .from("kyc_sessions").select("*").eq("sessionId", sessionId).maybeSingle();
-  if (error || !data) return inMemoryKycSessions.get(sessionId) ?? null;
+  if (error) console.warn("[prahari] getKycSession:", error.message);
+  if (error || !data) return null;
   return (data as KycSessionRow) ?? null;
 }
 
@@ -327,7 +372,7 @@ export async function markKycSessionVerified(sessionId: string): Promise<boolean
   const { error } = await sb.from("kyc_sessions")
     .update({ status: "verified", verifiedAt: new Date().toISOString() })
     .eq("sessionId", sessionId);
-  if (error) { console.warn("[prahari] markKycSessionVerified:", error.message); }
+  if (error) { console.warn("[prahari] markKycSessionVerified:", error.message); return false; }
   return true;
 }
 
@@ -339,7 +384,7 @@ export async function markKycSessionFailed(sessionId: string, status: "failed" |
   const sb = getSupabase();
   if (!sb) return true;
   const { error } = await sb.from("kyc_sessions").update({ status }).eq("sessionId", sessionId);
-  if (error) { console.warn("[prahari] markKycSessionFailed:", error.message); }
+  if (error) { console.warn("[prahari] markKycSessionFailed:", error.message); return false; }
   return true;
 }
 
@@ -353,11 +398,7 @@ export async function getTouristByDid(did: string): Promise<Row | null> {
     return null;
   }
   const { data, error } = await sb.from("tourists").select("*").eq("did", did).maybeSingle();
-  if (error || !data) {
-    for (const t of inMemoryTourists.values()) {
-      if (t.did === did) return t;
-    }
-  }
+  if (error) console.warn("[prahari] getTouristByDid:", error.message);
   return data ?? null;
 }
 
@@ -371,11 +412,7 @@ export async function getTouristBySubjectHash(subjectHash: string): Promise<Row 
   }
   const { data, error } = await sb
     .from("tourists").select("*").eq("kycSubjectHash", subjectHash).maybeSingle();
-  if (error || !data) {
-    for (const t of inMemoryTourists.values()) {
-      if (t.kycSubjectHash === subjectHash) return t;
-    }
-  }
+  if (error) console.warn("[prahari] getTouristBySubjectHash:", error.message);
   return data ?? null;
 }
 
@@ -387,7 +424,7 @@ export async function logCredentialIssuance(row: {
   const sb = getSupabase();
   if (!sb) return true;
   const { error } = await sb.from("credential_issuance").insert(row);
-  if (error) { console.warn("[prahari] logCredentialIssuance:", error.message); }
+  if (error) { console.warn("[prahari] logCredentialIssuance:", error.message); return false; }
   return true;
 }
 
@@ -450,4 +487,3 @@ export async function listUsers(): Promise<UserRow[]> {
   if (error) { console.warn("[prahari] listUsers:", error.message); return []; }
   return (data as UserRow[]) ?? [];
 }
-

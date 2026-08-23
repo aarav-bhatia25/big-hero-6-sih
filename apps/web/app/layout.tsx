@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Space_Grotesk } from "next/font/google";
-import "maplibre-gl/dist/maplibre-gl.css";
 import "./globals.css";
 
 const sans = Space_Grotesk({
@@ -14,15 +13,9 @@ export const metadata: Metadata = {
   description: "Predictive tourist safety and incident response",
 };
 
-// Applied before paint so there is no light→dark flash on load.
-const themeInit = `(function(){try{var t=localStorage.getItem('theme');var d=t?t==='dark':window.matchMedia('(prefers-color-scheme: dark)').matches;if(d)document.documentElement.classList.add('dark');}catch(e){}})();`;
-
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={sans.variable} suppressHydrationWarning>
-      <head>
-        <script dangerouslySetInnerHTML={{ __html: themeInit }} />
-      </head>
+    <html lang="en" className={sans.variable}>
       <body>{children}</body>
     </html>
   );

@@ -1,13 +1,10 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import Link from 'next/link';
 import {
-  ShieldCheck,
   MapPin,
   FileText,
   Shirt,
-  Download,
   Globe,
   Radio,
   CheckCircle2,
@@ -15,39 +12,69 @@ import {
   RefreshCw,
   Mic,
   PhoneCall,
-  Building2,
   AlertTriangle,
   LogOut,
 } from 'lucide-react';
 import DigitalIdCard from '@/components/tourist/DigitalIdCard';
 import SosButton from '@/components/tourist/SosButton';
 import MapView from '@/components/maps/MapView';
-import { calculateDeterministicRisk } from '@/lib/risk';
-import { checkPointInGeofence } from '@/lib/geospatial';
-import { fetchMLRiskScore, type MLRiskResult } from '@/lib/services/mlRiskClient';
-import ThemeToggle from '@/components/ui/ThemeToggle';
+
+type LiveSafetyRisk = {
+  score: number;
+  level: 'low' | 'medium' | 'high' | 'critical';
+  requires_human_review: boolean;
+  signals?: Array<{ code: string; message: string }>;
+};
+
+const LANG_MAP: Record<string, string> = {
+  'Hindi (हिंदी)': 'hi-IN',
+  'Marathi (मराठी)': 'mr-IN',
+  'Bengali (বাংলা)': 'bn-IN',
+  'Tamil (தமிழ்)': 'ta-IN',
+  'Telugu (తెలుగు)': 'te-IN',
+  'Gujarati (ગુજરાતી)': 'gu-IN',
+  'Kannada (ಕನ್ನಡ)': 'kn-IN',
+  'English': 'en-IN',
+};
 
 export default function CitizenPage() {
   const [greeting, setGreeting] = useState('Good morning');
-  const [coords, setCoords] = useState<{ lat: number; lng: number }>({ lat: 19.076, lng: 72.8777 });
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [locationConsent, setLocationConsent] = useState(true);
-  const [activeModal, setActiveModal] = useState<'none' | 'id_pass' | 'efir' | 'attire' | 'voice' | 'offline_map'>('none');
+  const [locationError, setLocationError] = useState<string | null>(null);
+  const [safetyAlert, setSafetyAlert] = useState<string | null>(null);
+  const [activeModal, setActiveModal] = useState<'none' | 'id_pass' | 'efir' | 'attire' | 'voice'>('none');
   
   // Incident & SOS state
   const [activeIncident, setActiveIncident] = useState<any | null>(null);
 
   // Clothing Profile Form State
   const [attireForm, setAttireForm] = useState({
-    top: 'Black Water-resistant Jacket',
-    bottom: 'Dark Blue Denim Jeans',
-    footwear: 'Grey Trekking Boots',
-    accessories: 'Red Backpack, Silver Watch',
+    top: '',
+    bottom: '',
+    footwear: '',
+    accessories: '',
   });
   const [attireSaved, setAttireSaved] = useState(false);
+  const [attireError, setAttireError] = useState<string | null>(null);
 
   // E-FIR State
   const [efirData, setEfirData] = useState<any | null>(null);
   const [efirLoading, setEfirLoading] = useState(false);
+  const [efirError, setEfirError] = useState<string | null>(null);
+  const [efirForm, setEfirForm] = useState({
+    category: 'Emergency / personal safety',
+    occurrenceAt: '',
+    narrative: '',
+    suspectDescription: '',
+    witnessName: '',
+    witnessContact: '',
+    stolenItems: '',
+    injuries: '',
+    evidenceReference: '',
+    callbackNumber: '',
+    declarationAccepted: false,
+  });
 
   // Multilingual Voice State
   const [listening, setListening] = useState(false);
@@ -56,9 +83,8 @@ export default function CitizenPage() {
   const [selectedLang, setSelectedLang] = useState('Hindi (हिंदी)');
   const [voiceError, setVoiceError] = useState<string | null>(null);
 
-  // ML Risk State
-  const [mlRisk, setMlRisk] = useState<MLRiskResult | null>(null);
-  const [riskSource, setRiskSource] = useState<'local' | 'ml'>('local');
+  // The score is returned by the server after it receives actual consented telemetry.
+  const [liveSafetyRisk, setLiveSafetyRisk] = useState<LiveSafetyRisk | null>(null);
 
 
   // Geofence & Risk State
@@ -69,12 +95,9 @@ export default function CitizenPage() {
   const [tourist, setTourist] = useState<any | null>(null);
   const touristId: string | null = tourist?.touristId ?? null;
 
-  // The geolocation watcher is registered once, so it would capture a stale
-  // touristId. A ref keeps the id current inside that long-lived closure.
-  const touristIdRef = useRef<string | null>(null);
-  useEffect(() => { touristIdRef.current = touristId; }, [touristId]);
+  const lastTelemetryRef = useRef<{ lat: number; lng: number; sentAt: number } | null>(null);
 
-  // Fetch geofences and set up location tracking
+  // Load the authenticated identity and published geofences once.
   useEffect(() => {
     const hour = new Date().getHours();
     if (hour < 12) setGreeting('Good morning');
@@ -91,32 +114,85 @@ export default function CitizenPage() {
     fetch('/api/tourists')
       .then((res) => res.json())
       .then((data) => {
-        if (data.success && data.tourist) setTourist(data.tourist);
+        if (data.success && data.tourist) {
+          setTourist(data.tourist);
+          if (typeof data.tourist.trackingConsent === 'boolean') setLocationConsent(data.tourist.trackingConsent);
+        }
       })
       .catch(console.error);
 
-    if (navigator.geolocation && locationConsent) {
-      const watchId = navigator.geolocation.watchPosition(
+  }, []);
+
+  // Start tracking only after the tourist identity is known. Previously the
+  // first GPS callback could arrive before this ID and be silently discarded.
+  useEffect(() => {
+    if (!locationConsent) {
+      setCoords(null);
+      setLiveSafetyRisk(null);
+      return;
+    }
+    if (!touristId) return;
+    if (!navigator.geolocation) {
+      setLocationError('This browser does not support location sharing.');
+      return;
+    }
+
+    setLocationError(null);
+    const watchId = navigator.geolocation.watchPosition(
         (pos) => {
           const lat = pos.coords.latitude;
           const lng = pos.coords.longitude;
           setCoords({ lat, lng });
 
-          // Send telemetry for the tourist this session actually belongs to.
-          if (touristIdRef.current) {
+          // Send at most once every 15 seconds unless the person moved more
+          // than ~25 m. This preserves a useful responder trail without
+          // needlessly draining the device or storing duplicate GPS points.
+          const last = lastTelemetryRef.current;
+          const movedEnough = !last || Math.hypot(lat - last.lat, lng - last.lng) > 0.00023;
+          const due = !last || Date.now() - last.sentAt >= 15_000;
+
+          if (movedEnough || due) {
+            lastTelemetryRef.current = { lat, lng, sentAt: Date.now() };
             fetch('/api/locations', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ touristId: touristIdRef.current, lat, lng, source: 'gps' }),
-            }).catch(() => {});
+              body: JSON.stringify({
+                touristId,
+                lat,
+                lng,
+                accuracy: pos.coords.accuracy,
+                speed: pos.coords.speed,
+                source: 'gps',
+              }),
+            })
+              .then(async (response) => ({ ok: response.ok, data: await response.json().catch(() => null) }))
+              .then(({ ok, data }) => {
+                if (!ok) {
+                  setLocationError(data?.error || 'Your location could not be saved.');
+                  return;
+                }
+                setLocationError(null);
+                if (!data?.safety) return;
+                setLiveSafetyRisk({
+                  score: data.safety.score,
+                  level: data.safety.level,
+                  requires_human_review: data.safety.requiresHumanReview,
+                  signals: data.safety.signals,
+                });
+                if (data.breach) {
+                  setSafetyAlert(`You entered ${data.breach.zone}. Incident ${data.breach.incidentId} was sent to the authority queue for review.`);
+                } else if (data.safetyReview) {
+                  setSafetyAlert(`Safety signals require human review. Incident ${data.safetyReview.incidentId} was added to the authority queue.`);
+                }
+              })
+              .catch(() => setLocationError('Your location could not be sent. Check your connection and try again.'));
           }
         },
-        () => {},
-        { enableHighAccuracy: true }
+        (error) => setLocationError(error.code === error.PERMISSION_DENIED ? 'Location sharing is blocked. Allow location access to enable safety monitoring and SOS.' : 'A current GPS location could not be obtained.'),
+        { enableHighAccuracy: true, maximumAge: 10_000, timeout: 15_000 }
       );
-      return () => navigator.geolocation.clearWatch(watchId);
-    }
-  }, [locationConsent]);
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, [locationConsent, touristId]);
 
   // Check geofence status
   const formattedGeofences = geofences.map((g) => ({
@@ -124,85 +200,74 @@ export default function CitizenPage() {
     name: g.name,
     type: 'HIGH_RISK' as const,
     severity: (g.severity?.toUpperCase() || 'HIGH') as any,
-    coordinates: g.coordinates || g.geometry?.coordinates?.[0]?.map(([lng, lat]: [number, number]) => [lat, lng]) || [
-      [19.070, 72.870],
-      [19.080, 72.870],
-      [19.080, 72.885],
-      [19.070, 72.885],
-      [19.070, 72.870],
-    ],
+    coordinates: g.coordinates || g.geometry?.coordinates?.[0]?.map(([lng, lat]: [number, number]) => [lat, lng]) || [],
   }));
 
-  const gfCheck = checkPointInGeofence(coords.lat, coords.lng, formattedGeofences);
-
-  // ── ML risk scoring with graceful fallback ──────────────────────
-  useEffect(() => {
-    const fetchRisk = async () => {
-      const result = await fetchMLRiskScore({
-        zone_risk: gfCheck.riskPenalty,
-        hour_of_day: new Date().getHours(),
-        route_deviation_m: 0,
-        inactivity_minutes: 0,
-      });
-      if (result) {
-        setMlRisk(result);
-        setRiskSource('ml');
-      } else {
-        setRiskSource('local');
-      }
-    };
-    fetchRisk();
-  }, [gfCheck.isBreached, gfCheck.riskPenalty]);
-
-  const riskEval = calculateDeterministicRisk({
-    inGeofence: gfCheck.isBreached,
-    geofenceSeverity: gfCheck.breachedZone?.severity,
-    crimeDensityIndex: mlRisk ? Math.min(30, mlRisk.score * 0.3) : 15,
-    routeAnomalyScore: mlRisk ? Math.min(20, mlRisk.score * 0.2) : 0,
-  });
+  const displayRiskScore = liveSafetyRisk?.score ?? null;
+  const displayRiskTier = liveSafetyRisk
+    ? ({ low: 'LOW', medium: 'MODERATE', high: 'HIGH', critical: 'CRITICAL' }[liveSafetyRisk.level])
+    : 'AWAITING TELEMETRY';
+  const riskMessage = liveSafetyRisk?.signals?.[0]?.message
+    ?? (coords ? 'Your latest location is being assessed by the safety engine.' : 'Share a current location to begin a safety assessment.');
 
   // Geofence breach → incident is handled authoritatively server-side in
   // POST /api/locations (with a 30-minute dedup window) when telemetry is
   // ingested, so the client does not create a duplicate incident here.
 
+  const toggleLocationConsent = async () => {
+    if (!touristId) return;
+    const nextConsent = !locationConsent;
+    setLocationError(null);
+    try {
+      const response = await fetch('/api/tourists', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ touristId, trackingConsent: nextConsent }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.success) {
+        throw new Error(data?.error || 'Your location-sharing preference could not be saved.');
+      }
+      setLocationConsent(nextConsent);
+      setSafetyAlert(nextConsent ? null : 'Location sharing is paused. No new telemetry will be sent until you resume it.');
+    } catch (error: any) {
+      setLocationError(error.message || 'Your location-sharing preference could not be saved.');
+    }
+  };
+
   // Handle Save Clothing Profile
   const handleSaveAttire = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await fetch('/api/attire', {
+      setAttireError(null);
+      const response = await fetch('/api/attire', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ touristId, ...attireForm }),
       });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.success) throw new Error(data?.error || 'The attire record could not be saved.');
       setAttireSaved(true);
       setTimeout(() => {
         setAttireSaved(false);
         setActiveModal('none');
       }, 1500);
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      setAttireError(err.message || 'The attire record could not be saved.');
     }
   };
 
+
   // Handle Generate E-FIR Draft
   const handleGenerateEfir = async () => {
-    const fallbackEfir = {
-      efirId: `EFIR-${Date.now()}`,
-      incidentId: activeIncident?.incidentId || `INC-4767`,
-      touristId: touristId || 'TOUR-7890',
-      touristName: tourist?.name || 'Ralston Fernandes',
-      passportAadhaar: 'IND-P892100',
-      incidentType: activeIncident ? activeIncident.type : 'Emergency SOS Panic Trigger',
-      location: { ...coords, address: 'Mira-Vasai Travel Corridor, Maharashtra' },
-      clothingProfile: `${attireForm.top}, ${attireForm.bottom}, ${attireForm.accessories}`,
-      emergencyContact: 'Ananya Sharma (+91 98765 43210)',
-      status: 'DRAFT_GENERATED',
-      policeVerification: 'PENDING_OFFICER_APPROVAL',
-      createdAt: new Date().toISOString(),
-    };
+    if (!touristId || !coords) {
+      setEfirError('A verified tourist ID and current GPS location are required before filing an E-FIR.');
+      return;
+    }
 
     try {
       setEfirLoading(true);
+      setEfirError(null);
       const res = await fetch('/api/efir', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -210,22 +275,31 @@ export default function CitizenPage() {
           incidentId: activeIncident?.incidentId,
           touristId,
           touristName: tourist?.name,
-          passportAadhaar: 'IND-P892100',
-          incidentType: activeIncident ? activeIncident.type : 'Emergency SOS Panic Alert',
-          location: coords,
-          clothingProfile: `${attireForm.top}, ${attireForm.bottom}, ${attireForm.accessories}`,
-          emergencyContact: 'Ananya Sharma (+91 98765 43210)',
+          passportAadhaar: tourist?.credential?.credentialSubject?.identityDocument?.masked,
+          incidentType: activeIncident?.type || 'E-FIR report',
+          incidentCategory: efirForm.category,
+          occurrenceAt: efirForm.occurrenceAt || null,
+          narrative: efirForm.narrative,
+          suspectDescription: efirForm.suspectDescription,
+          witnesses: efirForm.witnessName ? [{ name: efirForm.witnessName, contact: efirForm.witnessContact }] : [],
+          stolenItems: efirForm.stolenItems.split('\n').map((item) => item.trim()).filter(Boolean),
+          injuries: efirForm.injuries,
+          evidence: efirForm.evidenceReference ? [{ type: 'reference', reference: efirForm.evidenceReference }] : [],
+          callbackNumber: efirForm.callbackNumber,
+          declarationAccepted: efirForm.declarationAccepted,
+          location: { ...coords },
+          clothingProfile: [attireForm.top, attireForm.bottom, attireForm.footwear, attireForm.accessories].filter(Boolean).join(', ') || undefined,
         }),
       });
       const data = await res.json();
       if (data.success && data.efir) {
         setEfirData(data.efir);
       } else {
-        setEfirData(fallbackEfir);
+        setEfirError(data.error || 'The E-FIR could not be submitted.');
       }
     } catch (err) {
       console.error(err);
-      setEfirData(fallbackEfir);
+      setEfirError('The E-FIR could not be submitted. Check your connection and try again.');
     } finally {
       setEfirLoading(false);
     }
@@ -235,17 +309,6 @@ export default function CitizenPage() {
   const recognitionRef = useRef<any>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
-
-  const LANG_MAP: Record<string, string> = {
-    'Hindi (हिंदी)': 'hi-IN',
-    'Marathi (मराठी)': 'mr-IN',
-    'Bengali (বাংলা)': 'bn-IN',
-    'Tamil (தமிழ்)': 'ta-IN',
-    'Telugu (తెలుగు)': 'te-IN',
-    'Gujarati (ગુજરાતી)': 'gu-IN',
-    'Kannada (ಕನ್ನಡ)': 'kn-IN',
-    'English': 'en-IN',
-  };
 
   const handleStartVoice = useCallback(async () => {
     setVoiceError(null);
@@ -335,191 +398,171 @@ export default function CitizenPage() {
     setListening(false);
   }, []);
 
+  const openAuthorityCommand = async () => {
+    try {
+      const response = await fetch('/api/auth/me', { cache: 'no-store' });
+      const session = await response.json();
+      if (session.authenticated && ['authority', 'admin'].includes(session.user?.role)) {
+        window.location.href = '/authority';
+        return;
+      }
+    } catch {
+      // A tourist session is intentionally taken through the authority sign-in flow below.
+    }
+
+    await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+    window.location.href = '/login?redirect=/authority';
+  };
+
   return (
-    <div className="min-h-screen bg-bg text-ink font-sans selection:bg-accent selection:text-accent-ink pb-12">
-      {/* Portal Header */}
-      <header className="bg-surface border-b-2 border-line px-4 md:px-8 py-4 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3.5">
-          <div className="p-2.5 bg-accent text-accent-ink rounded-nb border-2 border-line">
-            <Building2 className="w-6 h-6" />
-          </div>
-          <div>
-            <h1 className="font-black text-ink text-xl tracking-tight leading-none">
-              Prahari Tourist Safety &amp; Digital Permit Portal
-            </h1>
-            <p className="text-xs text-ink-soft mt-1">
-              Digital Tourist Security • Verifiable Credentials • Emergency Dispatch
-            </p>
-          </div>
+    <div className="minimal-page min-h-screen pb-12 font-sans">
+      <header className="minimal-nav">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight text-ink">Prahari</h1>
+          <p className="mt-0.5 text-sm text-ink-soft">Your safety dashboard</p>
         </div>
 
         <div className="flex items-center gap-3">
-          <Link href="/admin" className="nb-btn nb-btn-accent text-xs">
-            <Radio className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Authority Command</span> →
-          </Link>
+          <button onClick={openAuthorityCommand} className="minimal-button minimal-button-primary" title="Open the authority sign-in">
+            <Radio className="size-4" /> <span className="hidden sm:inline">Authority desk</span> →
+          </button>
           <button
             onClick={async () => {
               await fetch('/api/auth/logout', { method: 'POST' });
               window.location.href = '/login';
             }}
             title="Logout"
-            className="nb-btn nb-btn-ghost !border-2 h-9 w-9 !px-0"
+            className="minimal-text-link inline-flex size-10 items-center justify-center rounded-lg border border-line hover:text-ink"
           >
             <LogOut className="w-4 h-4" />
           </button>
-          <ThemeToggle />
         </div>
       </header>
 
-      {/* 3. Main Container */}
-      <main className="max-w-5xl mx-auto px-4 pt-6 space-y-5">
-        {/* Welcome Letterhead & Restrained Risk Gauge */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {/* Official Traveller Registration Record */}
-          <div className="md:col-span-2 bg-surface p-5 rounded-nb border-2 border-line flex flex-col justify-between">
+      <main className="mx-auto max-w-6xl space-y-5 px-5 pt-8 sm:px-8">
+        <div className="grid gap-5 lg:grid-cols-3">
+          <section className="minimal-card flex flex-col justify-between p-6 lg:col-span-2">
             <div className="space-y-2">
-              <div className="flex items-center justify-between border-b-2 border-line pb-2">
-                <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-ink-soft">
-                  REGISTRATION RECORD NO. DTI-2026-891
+              <div className="flex items-center justify-between gap-3 border-b border-line pb-3">
+                <span className="text-xs font-medium text-ink-soft">
+                  Digital ID · {tourist?.touristId || 'Loading…'}
                 </span>
-                <span className="text-[11px] font-mono font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-500/15 px-2 py-0.5 rounded border border-emerald-500/30">
-                  STATUS: ACTIVE PERMIT
+                <span className="rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs font-semibold text-emerald-300">
+                  {tourist?.identityStatus?.toUpperCase() || 'LOADING'}
                 </span>
               </div>
-              <h2 className="font-serif font-bold text-2xl text-ink">{greeting}{tourist?.name ? `, ${tourist.name}` : ""}</h2>
-              <p className="text-xs text-ink-soft leading-relaxed">
+              <h2 className="text-2xl font-semibold tracking-tight text-ink">{greeting}{tourist?.name ? `, ${tourist.name}` : ""}</h2>
+              <p className="max-w-2xl text-sm leading-6 text-ink-soft">
                 {tourist?.did
-                  ? <>Your Digital Tourist Identity Permit (<span className="font-mono">{tourist.did}</span>) is registered with district emergency services. Spatial geofence boundaries and automated risk scoring are active.</>
+                  ? <>Your Digital Tourist ID (<span className="font-mono">{tourist.did}</span>) is active. Safety analysis begins only after you share a current location.</>
                   : <>No Digital Tourist ID has been issued for this session yet. Complete verification to activate emergency services registration.</>}
               </p>
             </div>
 
-            <div className="pt-3 mt-4 border-t-2 border-line flex items-center justify-between text-xs text-ink-soft font-mono">
-              <span className="flex items-center gap-1.5 text-ink font-bold">
-                <MapPin className="w-4 h-4 text-ink" /> GPS TELEMETRY: {coords.lat.toFixed(4)}, {coords.lng.toFixed(4)}
+            <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4 text-sm text-ink-soft">
+              <span className="flex items-center gap-2">
+                <MapPin className="size-4 text-sky-400" /> {coords ? `${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)}` : 'Waiting for current location'}
               </span>
               <button
-                onClick={() => setLocationConsent(!locationConsent)}
-                className={`px-3 py-1 rounded font-bold text-[11px] transition border cursor-pointer ${
+                onClick={toggleLocationConsent}
+                disabled={!touristId}
+                className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
                   locationConsent
-                    ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30'
-                    : 'bg-surface-2 text-ink-soft border-slate-300'
+                    ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-300'
+                    : 'border-line bg-surface-2 text-ink-soft'
                 }`}
               >
-                TELEMETRY: {locationConsent ? 'LOGGING ACTIVE' : 'SUSPENDED'}
+                Location sharing: {locationConsent ? 'On' : 'Off'}
               </button>
             </div>
-          </div>
+            {locationError && <p role="alert" className="mt-3 text-xs text-danger">{locationError}</p>}
+            {safetyAlert && <p role="status" className="mt-3 rounded border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-ink">{safetyAlert}</p>}
+          </section>
 
-          {/* Restrained Plain Risk Score Readout */}
-          <div className="bg-surface p-5 rounded-nb border-2 border-line flex flex-col justify-between text-center">
-            <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-ink-soft block border-b-2 border-line pb-2">
-              DYNAMIC RISK EVALUATION (FORM R-7)
+          <section className="minimal-card flex flex-col justify-between p-6 text-center">
+            <span className="border-b border-line pb-3 text-xs font-semibold uppercase tracking-wide text-ink-soft">
+              Safety status
             </span>
-            <div className="my-3">
-              <span className="text-3xl font-mono font-bold text-ink">
-                {riskEval.totalScore} <span className="text-sm font-sans text-ink-soft font-normal">/ 100</span>
+            <div className="my-5">
+              <span className="text-4xl font-semibold tracking-tight text-ink">
+                {displayRiskScore ?? '—'} <span className="text-sm font-sans text-ink-soft font-normal">/ 100</span>
               </span>
               <div className="mt-2 flex items-center justify-center">
-                <span className={`inline-flex items-center gap-1.5 px-3.5 py-1 rounded font-mono text-xs font-black uppercase tracking-wider border shadow-sm ${
-                  riskEval.tier === 'CRITICAL'
+                <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold ${
+                  displayRiskTier === 'AWAITING TELEMETRY'
+                    ? 'bg-surface-2 text-ink-soft border-line'
+                    : displayRiskTier === 'CRITICAL'
                     ? 'bg-red-500/20 text-red-700 dark:text-red-300 border-red-500/40'
-                    : riskEval.tier === 'HIGH'
+                    : displayRiskTier === 'HIGH'
                     ? 'bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-500/40'
-                    : riskEval.tier === 'MODERATE'
+                    : displayRiskTier === 'MODERATE'
                     ? 'bg-yellow-500/20 text-yellow-700 dark:text-yellow-300 border-yellow-500/40'
                     : 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-500/40'
                 }`}>
                   <span className={`w-2.5 h-2.5 rounded-full animate-pulse ${
-                    riskEval.tier === 'CRITICAL' ? 'bg-red-500' :
-                    riskEval.tier === 'HIGH' ? 'bg-amber-500' :
-                    riskEval.tier === 'MODERATE' ? 'bg-yellow-500' : 'bg-emerald-400'
+                    displayRiskTier === 'AWAITING TELEMETRY' ? 'bg-slate-400' :
+                    displayRiskTier === 'CRITICAL' ? 'bg-red-500' :
+                    displayRiskTier === 'HIGH' ? 'bg-amber-500' :
+                    displayRiskTier === 'MODERATE' ? 'bg-yellow-500' : 'bg-emerald-400'
                   }`} />
-                  {riskEval.tier}
+                  {displayRiskTier}
                 </span>
               </div>
             </div>
-            <p className="text-[11px] font-mono text-ink-soft">
-              {gfCheck.isBreached ? 'HIGH RISK GEOFENCE BREACH DETECTED' : 'SAFE TRAVEL CORRIDOR • NO ACTIVE BREACH'}
+            <p className="text-sm leading-6 text-ink-soft">
+              {riskMessage}
             </p>
-            <p className="text-[10px] font-mono text-ink-soft mt-1">
-              SOURCE: {riskSource === 'ml' ? 'ML SERVICE' : 'LOCAL ENGINE'}
+            <p className="mt-2 text-xs text-ink-soft">
+              {liveSafetyRisk ? 'Server-side explainable safety signals' : 'No assessment before telemetry'}
             </p>
-          </div>
+          </section>
         </div>
 
         {/* 4. Signature SOS Button Component */}
         <SosButton
-          touristPos={coords}
+          touristPos={coords ?? undefined}
+          touristId={touristId ?? undefined}
           onSosTriggered={(inc) => {
             setActiveIncident(inc);
           }}
+          onSosCancelled={() => setActiveIncident(null)}
         />
 
         {/* 5. Official Digital Tourist ID Pass Component */}
         <DigitalIdCard tourist={tourist} />
 
-        {/* 6. Form Action Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {/* E-FIR Draft Button */}
+        <div className="grid gap-4 sm:grid-cols-2">
           <button
             onClick={() => {
               setActiveModal('efir');
-              if (!efirData) handleGenerateEfir();
             }}
-            className="bg-surface p-4 rounded-nb border-2 border-line hover:border-line transition flex flex-col items-center text-center gap-2 text-ink group cursor-pointer"
+            className="minimal-card minimal-card-link flex items-center gap-4 p-5 text-left"
           >
-            <div className="p-2.5 bg-surface-2 text-ink rounded border-2 border-line group-hover:bg-accent group-hover:text-white transition">
+            <div className="rounded-lg bg-sky-400/10 p-3 text-sky-400">
               <FileText className="w-5 h-5" />
             </div>
-            <span className="text-xs font-serif font-bold text-ink">Automated E-FIR Draft</span>
-            <span className="text-[10px] font-mono text-ink-soft">FORM E-154 COMPLAINT</span>
+            <span><span className="block font-semibold text-ink">File an E-FIR</span><span className="mt-1 block text-sm text-ink-soft">Submit a factual report for officer review.</span></span>
           </button>
 
           {/* AI Attire Profile Button */}
           <button
             onClick={() => setActiveModal('attire')}
-            className="bg-surface p-4 rounded-nb border-2 border-line hover:border-line transition flex flex-col items-center text-center gap-2 text-ink group cursor-pointer"
+            className="minimal-card minimal-card-link flex items-center gap-4 p-5 text-left"
           >
-            <div className="p-2.5 bg-surface-2 text-ink rounded border-2 border-line group-hover:bg-accent group-hover:text-white transition">
+            <div className="rounded-lg bg-sky-400/10 p-3 text-sky-400">
               <Shirt className="w-5 h-5" />
             </div>
-            <span className="text-xs font-serif font-bold text-ink">Visual Attire Record</span>
-            <span className="text-[10px] font-mono text-ink-soft">FORM V-09 SPECIFIERS</span>
+            <span><span className="block font-semibold text-ink">Visual attire record</span><span className="mt-1 block text-sm text-ink-soft">Optional details that may help after an emergency.</span></span>
           </button>
 
-          {/* Voice Assistance Button */}
-          <button
-            onClick={() => setActiveModal('voice')}
-            className="bg-surface p-4 rounded-nb border-2 border-line hover:border-line transition flex flex-col items-center text-center gap-2 text-ink group cursor-pointer"
-          >
-            <div className="p-2.5 bg-surface-2 text-ink rounded border-2 border-line group-hover:bg-accent group-hover:text-white transition">
-              <Mic className="w-5 h-5" />
-            </div>
-            <span className="text-xs font-serif font-bold text-ink">Sarvam Voice SOS</span>
-            <span className="text-[10px] font-mono text-ink-soft">10+ INDIAN LANGUAGES</span>
-          </button>
-
-          {/* Offline Maps Button */}
-          <button
-            onClick={() => setActiveModal('offline_map')}
-            className="bg-surface p-4 rounded-nb border-2 border-line hover:border-line transition flex flex-col items-center text-center gap-2 text-ink group cursor-pointer"
-          >
-            <div className="p-2.5 bg-surface-2 text-ink rounded border-2 border-line group-hover:bg-accent group-hover:text-white transition">
-              <Download className="w-5 h-5" />
-            </div>
-            <span className="text-xs font-serif font-bold text-ink">Offline Vector Tiles</span>
-            <span className="text-[10px] font-mono text-ink-soft">NO-NETWORK CACHE</span>
-          </button>
         </div>
 
-        {/* 7. Plain Bordered Spatial Map Container */}
-        <div className="bg-surface p-4 rounded-nb border-2 border-line space-y-3">
-          <div className="flex items-center justify-between border-b-2 border-line pb-2">
-            <h3 className="font-serif font-bold text-ink text-sm flex items-center gap-2">
-              <Globe className="w-4 h-4 text-ink" /> District Spatial Safety Map & Official Polygon Bounds
+        <section className="minimal-card space-y-4 p-5">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line pb-3">
+            <h3 className="flex items-center gap-2 font-semibold text-ink">
+              <Globe className="size-4 text-sky-400" /> Safety map
             </h3>
-            <span className="text-[11px] font-mono text-ink-soft">OPENSTREETMAP VECTOR TILES</span>
+            <span className="text-xs text-ink-soft">Live location and configured zones</span>
           </div>
 
           <MapView
@@ -534,20 +577,15 @@ export default function CitizenPage() {
               severity: activeIncident.severity,
             }] : []}
           />
-        </div>
+        </section>
 
-        {/* 8. Official Notice Strip Helpline Footer */}
-        <footer className="bg-accent text-accent-ink p-4 rounded-nb border-2 border-line flex flex-wrap items-center justify-between gap-3 text-xs font-mono">
+        <footer className="minimal-footer rounded-xl border border-line">
           <div className="flex items-center gap-2">
-            <PhoneCall className="w-4 h-4 text-amber-400" />
-            <span>NATIONAL EMERGENCY HOTLINE: <strong className="text-white font-mono">112</strong></span>
+            <PhoneCall className="size-4 text-sky-400" />
+            <span>Emergency: <strong className="text-ink">112</strong></span>
           </div>
-          <div>
-            <span>TOURIST HELPLINE: <strong className="text-white font-mono">1363</strong></span>
-          </div>
-          <div>
-            <span>DPDP ACT 2023 COMPLIANT</span>
-          </div>
+          <span>Tourist helpline: <strong className="text-ink">1363</strong></span>
+          <span>Location sharing is optional</span>
         </footer>
       </main>
 
@@ -567,15 +605,17 @@ export default function CitizenPage() {
                 <FileText className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="font-serif font-bold text-lg text-ink">Automated E-FIR Complaint Draft</h3>
+                <h3 className="font-serif font-bold text-lg text-ink">E-FIR complaint</h3>
                 <p className="text-xs text-ink-soft font-mono">Under Section 154 Code of Criminal Procedure (CrPC)</p>
               </div>
             </div>
 
+            {efirError && <p role="alert" className="rounded border border-danger/50 bg-danger/10 p-3 text-xs text-ink">{efirError}</p>}
+
             {efirLoading ? (
               <div className="py-10 flex flex-col items-center justify-center text-ink-soft text-xs gap-2 font-mono">
                 <RefreshCw className="w-6 h-6 animate-spin text-ink" />
-                <span>Compiling draft report from verified credentials...</span>
+                <span>Submitting your report to the district police queue...</span>
               </div>
             ) : efirData ? (
               <div className="space-y-2.5 text-xs bg-surface-2 p-4 rounded border-2 border-line">
@@ -607,15 +647,56 @@ export default function CitizenPage() {
                   <span>OFFICER VERIFICATION:</span>
                   <span>{efirData.policeVerification}</span>
                 </div>
+                <p className="border-t-2 border-line pt-2 text-ink-soft leading-relaxed">
+                  {efirData.narrative}
+                </p>
+                <div className="text-[11px] text-ink-soft">Submitted {new Date(efirData.createdAt).toLocaleString()} · immutable evidence receipt will appear after officer review.</div>
               </div>
-            ) : null}
+            ) : (
+              <form
+                className="space-y-3 text-xs"
+                onSubmit={(event) => { event.preventDefault(); handleGenerateEfir(); }}
+              >
+                <p className="rounded border border-warning/40 bg-warning/10 p-2 text-ink-soft leading-relaxed">
+                  Include facts you personally know. Do not include passwords, bank PINs, or unnecessary identity numbers.
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="space-y-1"><span className="font-bold">Incident category</span>
+                    <select value={efirForm.category} onChange={(e) => setEfirForm({ ...efirForm, category: e.target.value })} className="w-full rounded border-2 border-line bg-surface-2 p-2">
+                      <option>Emergency / personal safety</option><option>Theft or lost property</option><option>Harassment or assault</option><option>Missing person concern</option><option>Other</option>
+                    </select>
+                  </label>
+                  <label className="space-y-1"><span className="font-bold">When did it happen?</span>
+                    <input type="datetime-local" value={efirForm.occurrenceAt} onChange={(e) => setEfirForm({ ...efirForm, occurrenceAt: e.target.value })} className="w-full rounded border-2 border-line bg-surface-2 p-2" />
+                  </label>
+                </div>
+                <label className="block space-y-1"><span className="font-bold">What happened? <span className="text-danger">*</span></span>
+                  <textarea required minLength={20} rows={4} value={efirForm.narrative} onChange={(e) => setEfirForm({ ...efirForm, narrative: e.target.value })} placeholder="Describe events in order: who, what, when, and what help is needed." className="w-full rounded border-2 border-line bg-surface-2 p-2" />
+                </label>
+                <label className="block space-y-1"><span className="font-bold">Suspect / person description (if relevant)</span>
+                  <input value={efirForm.suspectDescription} onChange={(e) => setEfirForm({ ...efirForm, suspectDescription: e.target.value })} placeholder="Appearance, vehicle, direction of travel" className="w-full rounded border-2 border-line bg-surface-2 p-2" />
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="space-y-1"><span className="font-bold">Witness name</span><input value={efirForm.witnessName} onChange={(e) => setEfirForm({ ...efirForm, witnessName: e.target.value })} className="w-full rounded border-2 border-line bg-surface-2 p-2" /></label>
+                  <label className="space-y-1"><span className="font-bold">Witness contact</span><input value={efirForm.witnessContact} onChange={(e) => setEfirForm({ ...efirForm, witnessContact: e.target.value })} className="w-full rounded border-2 border-line bg-surface-2 p-2" /></label>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="space-y-1"><span className="font-bold">Injuries / medical need</span><input value={efirForm.injuries} onChange={(e) => setEfirForm({ ...efirForm, injuries: e.target.value })} className="w-full rounded border-2 border-line bg-surface-2 p-2" /></label>
+                  <label className="space-y-1"><span className="font-bold">Callback number</span><input type="tel" value={efirForm.callbackNumber} onChange={(e) => setEfirForm({ ...efirForm, callbackNumber: e.target.value })} className="w-full rounded border-2 border-line bg-surface-2 p-2" /></label>
+                </div>
+                <label className="block space-y-1"><span className="font-bold">Property / items (one per line)</span><textarea rows={2} value={efirForm.stolenItems} onChange={(e) => setEfirForm({ ...efirForm, stolenItems: e.target.value })} className="w-full rounded border-2 border-line bg-surface-2 p-2" /></label>
+                <label className="block space-y-1"><span className="font-bold">Evidence reference</span><input value={efirForm.evidenceReference} onChange={(e) => setEfirForm({ ...efirForm, evidenceReference: e.target.value })} placeholder="Photo ID, CCTV request, document reference (no uploads yet)" className="w-full rounded border-2 border-line bg-surface-2 p-2" /></label>
+                <label className="flex gap-2 items-start text-ink-soft"><input required type="checkbox" checked={efirForm.declarationAccepted} onChange={(e) => setEfirForm({ ...efirForm, declarationAccepted: e.target.checked })} className="mt-0.5" /><span>I confirm this information is true to the best of my knowledge and consent to police review.</span></label>
+                <button type="submit" className="w-full py-2.5 bg-accent hover:bg-accent-strong text-white font-bold text-xs rounded transition cursor-pointer font-mono">SUBMIT E-FIR FOR POLICE REVIEW</button>
+              </form>
+            )}
 
-            <button
+            {efirData && <button
               onClick={() => setActiveModal('none')}
               className="w-full py-2.5 bg-accent hover:bg-accent-strong text-white font-bold text-xs rounded transition cursor-pointer font-mono"
             >
-              SUBMIT E-FIR DRAFT TO DISTRICT POLICE CONTROL ROOM
-            </button>
+              CLOSE RECEIPT
+            </button>}
           </div>
         </div>
       )}
@@ -647,6 +728,7 @@ export default function CitizenPage() {
               </div>
             ) : (
               <form onSubmit={handleSaveAttire} className="space-y-3 text-xs">
+                {attireError && <p role="alert" className="rounded border border-danger/50 bg-danger/10 p-3 text-xs text-ink">{attireError}</p>}
                 <div>
                   <label className="block text-ink-soft mb-1 font-mono font-bold">TOP WEAR (JACKET/SHIRT)</label>
                   <input
@@ -669,11 +751,19 @@ export default function CitizenPage() {
                   <label className="block text-ink-soft mb-1 font-mono font-bold">FOOTWEAR & ACCESSORIES</label>
                   <input
                     type="text"
+                    value={attireForm.footwear}
+                    onChange={(e) => setAttireForm({ ...attireForm, footwear: e.target.value })}
+                    placeholder="Footwear"
+                    className="w-full mb-2 bg-surface-2 border-2 border-line rounded p-2.5 text-ink focus:outline-none focus:border-line"
+                  />
+                  <input
+                    type="text"
                     value={attireForm.accessories}
                     onChange={(e) => setAttireForm({ ...attireForm, accessories: e.target.value })}
                     className="w-full bg-surface-2 border-2 border-line rounded p-2.5 text-ink focus:outline-none focus:border-line"
                   />
                 </div>
+
 
                 <button
                   type="submit"
@@ -790,7 +880,7 @@ export default function CitizenPage() {
 
                     <div className="p-3 bg-surface rounded border border-emerald-500/30 text-ink">
                       <p className="text-sm font-semibold text-ink leading-relaxed font-sans select-all">
-                        "{transcribedText}"
+                        &quot;{transcribedText}&quot;
                       </p>
                     </div>
 
@@ -798,7 +888,8 @@ export default function CitizenPage() {
                       <button
                         type="button"
                         onClick={() => {
-                          handleGenerateEfir();
+                          setEfirData(null);
+                          setEfirForm((current) => ({ ...current, narrative: transcribedText }));
                           setActiveModal('efir');
                         }}
                         className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-mono text-xs font-bold rounded shadow transition flex items-center justify-center gap-1.5 cursor-pointer"
@@ -821,44 +912,6 @@ export default function CitizenPage() {
         </div>
       )}
 
-      {/* MODAL 4: Offline Map */}
-      {activeModal === 'offline_map' && (
-        <div className="fixed inset-0 z-50 bg-surface-2/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-nb border-2 border-line bg-surface p-6 shadow-nb relative text-ink space-y-4">
-            <button
-              onClick={() => setActiveModal('none')}
-              className="absolute top-4 right-4 text-ink-soft hover:text-ink p-1 bg-surface-2 rounded cursor-pointer border-2 border-line"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <div className="flex items-center gap-3 border-b-2 border-line pb-3">
-              <div className="p-2.5 bg-accent text-accent-ink rounded">
-                <Download className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="font-serif font-bold text-lg text-ink">Offline Vector Map Tiles</h3>
-                <p className="text-xs text-ink-soft font-mono">No-Network Emergency Region Cache</p>
-              </div>
-            </div>
-
-            <div className="space-y-3 text-xs">
-              <div className="bg-surface-2 p-3 rounded border-2 border-line flex items-center justify-between">
-                <div>
-                  <span className="font-serif font-bold text-ink block">Pink City & Fort Ridge Region</span>
-                  <span className="text-ink-soft font-mono text-[11px]">Size: 24.5 MB • Includes Patrol Nodes</span>
-                </div>
-                <button
-                  onClick={() => alert('Downloaded Pink City Offline Map Pack to LocalCache!')}
-                  className="px-3 py-1.5 bg-accent hover:bg-accent-strong text-white font-bold rounded transition font-mono"
-                >
-                  DOWNLOAD
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

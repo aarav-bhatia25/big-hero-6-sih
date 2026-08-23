@@ -3,8 +3,9 @@ import type { KeyObject } from 'node:crypto';
 import { base58, deriveDid, buildDidDocument } from './did';
 import type { KycSubject } from '../kyc/types';
 
-/** Credential validity: 1 year, matching a typical tourist-visa horizon. */
-const VALIDITY_MS = 365 * 24 * 60 * 60 * 1000;
+/** Legacy API callers receive a conservative 30-day credential. */
+const DEFAULT_VALIDITY_MS = 30 * 24 * 60 * 60 * 1000;
+const MAX_VALIDITY_MS = 365 * 24 * 60 * 60 * 1000;
 
 let cachedKeys: { privateKey: KeyObject; publicKey: KeyObject } | null = null;
 
@@ -79,6 +80,11 @@ export interface IssuedIdentity {
   expiresAt: string;
 }
 
+export type CredentialIssueOptions = {
+  /** Trip end supplied during onboarding; the credential is never valid past it. */
+  expiresAt?: string;
+};
+
 /**
  * Builds and signs a W3C Verifiable Credential for a verified KYC subject.
  * The credential carries no document number — only the masked fragment and
@@ -88,11 +94,17 @@ export function issueCredential(
   subject: KycSubject,
   touristId: string,
   providerId: string,
-  isSandbox: boolean
+  isSandbox: boolean,
+  options: CredentialIssueOptions = {}
 ): IssuedIdentity {
   const did = deriveDid(subject.subjectHash);
   const now = new Date();
-  const expires = new Date(now.getTime() + VALIDITY_MS);
+  const requestedExpiry = options.expiresAt ? new Date(options.expiresAt) : null;
+  const expires = requestedExpiry && Number.isFinite(requestedExpiry.getTime()) &&
+    requestedExpiry.getTime() > now.getTime() &&
+    requestedExpiry.getTime() <= now.getTime() + MAX_VALIDITY_MS
+      ? requestedExpiry
+      : new Date(now.getTime() + DEFAULT_VALIDITY_MS);
 
   const vc: VerifiableCredential = {
     '@context': [
@@ -118,6 +130,7 @@ export function issueCredential(
         subjectHash: subject.subjectHash,
       },
       verification: { method: subject.documentType, provider: providerId, verifiedAt: now.toISOString(), ...(subject.meta ?? {}) },
+      trip: { validUntil: expires.toISOString() },
     },
     ...(isSandbox
       ? {

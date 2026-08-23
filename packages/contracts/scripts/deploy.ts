@@ -1,7 +1,13 @@
 import { ethers } from "hardhat";
+import { mkdir, writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
 
 async function main() {
   const [deployer] = await ethers.getSigners();
+  const network = await ethers.provider.getNetwork();
+  if (network.chainId !== 11_155_111n) {
+    throw new Error(`Refusing public deployment: expected Sepolia (11155111), received chain ${network.chainId}.`);
+  }
   console.log("Deploying Tourist Safety Platform smart contracts with deployer:", deployer.address);
 
   // 1. Deploy IncidentRegistry
@@ -32,13 +38,25 @@ async function main() {
   const responderRegistryAddr = await responderRegistry.getAddress();
   console.log("ResponderRegistry deployed to:", responderRegistryAddr);
 
-  console.log("\n--- Smart Contracts Deployment Summary ---");
-  console.log({
+  const deployment = {
+    network: "sepolia",
+    chainId: Number(network.chainId),
+    deployer: deployer.address,
+    addresses: {
     IncidentRegistry: incidentRegistryAddr,
     TouristIdentityRegistry: touristIdentityRegistryAddr,
     GeofenceRegistry: geofenceRegistryAddr,
     ResponderRegistry: responderRegistryAddr,
-  });
+    },
+  };
+  await mkdir(resolve(__dirname, "../deployments"), { recursive: true });
+  await writeFile(
+    resolve(__dirname, "../deployments/sepolia.json"),
+    `${JSON.stringify(deployment, null, 2)}\n`
+  );
+
+  console.log("\n--- Smart Contracts Deployment Summary ---");
+  console.log(deployment);
 }
 
 main().catch((error) => {

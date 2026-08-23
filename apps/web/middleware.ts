@@ -3,7 +3,6 @@ import { verifySessionToken, SESSION_COOKIE_NAME } from '@/lib/auth/session';
 
 // Paths that require specific roles
 const ROLE_ROUTE_MAP: Record<string, string[]> = {
-  '/admin': ['admin', 'authority'],
   '/authority': ['admin', 'authority'],
   '/citizen': ['tourist', 'authority', 'admin'],
   '/tourist': ['tourist', 'authority', 'admin'],
@@ -14,6 +13,12 @@ const ROLE_ROUTE_MAP: Record<string, string[]> = {
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // Admin and authority had duplicate interfaces. The one command console is
+  // now Authority; keep legacy URLs working without presenting a second role.
+  if (pathname === '/admin' || pathname.startsWith('/admin/')) {
+    return NextResponse.redirect(new URL('/authority', request.url));
+  }
 
   // 1. Skip static assets, _next, favicon, and API routes (API routes have their own requireAuth guards)
   if (
@@ -34,7 +39,7 @@ export async function middleware(request: NextRequest) {
   if (pathname === '/login') {
     if (session) {
       if (session.role === 'admin' || session.role === 'authority') {
-        return NextResponse.redirect(new URL('/admin', request.url));
+        return NextResponse.redirect(new URL('/authority', request.url));
       }
       return NextResponse.redirect(new URL('/citizen', request.url));
     }

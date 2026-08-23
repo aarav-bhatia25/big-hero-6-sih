@@ -8,12 +8,18 @@ export async function POST(request: NextRequest) {
     const audioFile = formData.get('file') as Blob | File | null;
     const languageCode = (formData.get('language_code') as string) || 'hi-IN';
 
-    const sarvamApiKey = process.env.SARVAM_API_KEY || 'sk_0jrl1e5n_bi4WYdaK9fnjN7Gfji7RJnwc';
+    const sarvamApiKey = process.env.SARVAM_API_KEY;
 
     if (!audioFile) {
       return NextResponse.json(
         { success: false, error: 'No audio file provided in request' },
         { status: 400 }
+      );
+    }
+    if (!sarvamApiKey) {
+      return NextResponse.json(
+        { success: false, error: 'Voice transcription is not configured. Set SARVAM_API_KEY on the server to enable it.' },
+        { status: 503 }
       );
     }
 
@@ -35,13 +41,7 @@ export async function POST(request: NextRequest) {
       const errorText = await sarvamRes.text();
       console.error('[sarvam-stt-error]', sarvamRes.status, errorText);
 
-      return NextResponse.json({
-        success: true,
-        transcript: 'Emergency distress signal received! Dispatching nearest patrol unit to current GPS coordinates.',
-        language_code: languageCode,
-        provider: 'sarvam_ai_fallback',
-        warning: `Sarvam API returned HTTP ${sarvamRes.status}`,
-      });
+      return NextResponse.json({ success: false, error: 'Voice transcription provider is temporarily unavailable.' }, { status: 502 });
     }
 
     const data = await sarvamRes.json();

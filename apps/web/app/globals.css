@@ -3,27 +3,10 @@
 @tailwind utilities;
 
 /* ───────────────────────────── Neobrutalism design tokens ─────────────────
-   Accent: sky blue.  Dark mode: Google grey.
+   Accent: sky blue. Dark-only Google-grey interface.
    Thick borders + hard (blur-less) offset shadows are the signature. */
 @layer base {
   :root {
-    --nb-bg: #eef1f6;
-    --nb-surface: #ffffff;
-    --nb-surface-2: #e7ebf1;
-    --nb-ink: #0f1419;
-    --nb-ink-soft: #55606e;
-    --nb-border: #0f1419;
-
-    --nb-accent: #0ea5e9;        /* sky-500 */
-    --nb-accent-strong: #0284c7; /* sky-600 */
-    --nb-accent-soft: #e0f2fe;   /* sky-100 tinted fill */
-    --nb-accent-ink: #04283a;    /* near-black text on accent */
-
-    --nb-shadow: 4px 4px 0 var(--nb-border);
-    --nb-radius: 6px;
-  }
-
-  .dark {
     --nb-bg: #202124;            /* Google grey background */
     --nb-surface: #2a2b2e;
     --nb-surface-2: #35363a;
@@ -182,5 +165,103 @@
   .nb-chip-accent {
     background: var(--nb-accent);
     color: var(--nb-accent-ink);
+  }
+
+  /* Quiet, content-first primitives used by the public entry and sign-in
+     screens. The operational dashboards retain their high-contrast UI. */
+  .minimal-page {
+    background: var(--nb-bg);
+    color: var(--nb-ink);
+  }
+  .minimal-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    width: 100%;
+    padding: 1rem clamp(1.25rem, 4vw, 4rem);
+    border-bottom: 1px solid color-mix(in srgb, var(--nb-border) 28%, transparent);
+  }
+  .minimal-eyebrow {
+    color: var(--nb-accent-strong);
+    font-size: 0.8125rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+  .minimal-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-height: 2.75rem;
+    border-radius: 0.625rem;
+    padding: 0.7rem 1rem;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    line-height: 1.2;
+    transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+  }
+  .minimal-button:hover { transform: translateY(-1px); }
+  .minimal-button-primary {
+    background: #e0f2fe;
+    color: #075985;
+    border: 1px solid #7dd3fc;
+  }
+  .minimal-button-primary:hover { background: #bae6fd; border-color: #38bdf8; }
+  .minimal-button-secondary {
+    background: transparent;
+    color: var(--nb-ink);
+    border: 1px solid color-mix(in srgb, var(--nb-border) 38%, transparent);
+  }
+  .minimal-button-secondary:hover { background: color-mix(in srgb, var(--nb-surface-2) 70%, transparent); }
+  .minimal-button-large { min-height: 3.25rem; padding-inline: 1.25rem; font-size: 1rem; }
+  .minimal-text-link { color: var(--nb-ink-soft); font-size: 0.9375rem; font-weight: 500; }
+  .minimal-text-link:hover { color: var(--nb-ink); }
+  .minimal-card {
+    display: block;
+    border: 1px solid color-mix(in srgb, var(--nb-border) 24%, transparent);
+    border-radius: 0.875rem;
+    padding: 2rem;
+    background: color-mix(in srgb, var(--nb-surface) 94%, transparent);
+  }
+  .minimal-card-link { transition: border-color 0.15s ease, transform 0.15s ease, background-color 0.15s ease; }
+  .minimal-card-link:hover {
+    transform: translateY(-2px);
+    border-color: color-mix(in srgb, var(--nb-accent-strong) 65%, var(--nb-border));
+    background: var(--nb-surface);
+  }
+  .minimal-card-action {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    margin-top: 1.75rem;
+    color: var(--nb-accent-strong);
+    font-size: 1rem;
+    font-weight: 600;
+  }
+  .minimal-card-link:hover .minimal-card-action svg { transform: translateX(0.2rem); }
+  .minimal-card-action svg { transition: transform 0.15s ease; }
+  .minimal-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    width: 100%;
+    padding: 1.25rem clamp(1.25rem, 4vw, 4rem);
+    border-top: 1px solid color-mix(in srgb, var(--nb-border) 28%, transparent);
+    color: var(--nb-ink-soft);
+    font-size: 0.8125rem;
+  }
+  .onboarding-notice {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    border: 1px solid #7dd3fc;
+    border-radius: 0.875rem;
+    padding: 1rem 1.125rem;
+    background: #0c3044;
+    border-color: #38bdf8;
+    color: #d9f4ff;
   }
 }

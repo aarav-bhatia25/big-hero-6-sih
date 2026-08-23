@@ -1,5 +1,6 @@
-import Link from "next/link";
-import { ChevronLeft, Globe2, MapPin, MessageSquareMore, Phone, ShieldCheck } from "lucide-react";
-import { SosButton } from "@/components/traveller/sos-button";
-import { Button } from "@/components/ui/button";
-export default function SosPage() { return <main className="mx-auto flex min-h-screen max-w-lg flex-col bg-gradient-to-b from-sky-50 to-white px-5 py-6"><div className="flex items-center justify-between"><Link href="/" className="rounded-lg bg-white p-2 shadow-sm"><ChevronLeft size={20}/></Link><div className="flex items-center gap-2 text-sm font-bold text-brand-600"><ShieldCheck size={18}/> Prahari</div><button className="rounded-lg bg-white p-2 shadow-sm"><Globe2 size={20}/></button></div><div className="mt-16 text-center"><span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700"><span className="size-2 rounded-full bg-emerald-500"/> You are protected</span><h1 className="mt-5 text-3xl font-bold">How can we help?</h1><p className="mt-2 text-slate-500">Your location will be shared only during an emergency.</p></div><div className="my-12 flex justify-center"><SosButton/></div><p className="text-center text-sm text-slate-500">Press SOS to notify nearby responders and your trusted contact.</p><div className="mt-auto grid gap-3"><Button variant="outline" className="justify-start bg-white"><MapPin size={18} className="text-brand-500"/> Share my live location</Button><Button variant="outline" className="justify-start bg-white"><MessageSquareMore size={18} className="text-brand-500"/> Report a safety concern</Button><Button variant="outline" className="justify-start bg-white"><Phone size={18} className="text-brand-500"/> Emergency contacts</Button></div></main>; }
+import { redirect } from 'next/navigation';
+
+/** The former standalone SOS page was a non-functional duplicate. */
+export default function SosPage() {
+  redirect('/citizen');
+}

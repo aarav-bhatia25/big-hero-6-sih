@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getTourist, updateTourist } from "@/lib/db";
+import { getTourist, listTourists, updateTourist } from "@/lib/db";
 import { requireAuth, canAccessTouristData } from "@/lib/auth/guards";
+import { operationalTourists } from "@/lib/operationalData";
 
 export async function GET(request: NextRequest) {
   const auth = await requireAuth(request);
@@ -10,8 +11,18 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const requestedId = searchParams.get("touristId");
 
-  // Determine target tourist ID
-  const targetId = requestedId || (session.role === 'tourist' ? session.touristId : 'TOUR-7890') || 'TOUR-7890';
+  if (!requestedId && ['authority', 'admin', 'responder'].includes(session.role)) {
+    try {
+      return NextResponse.json({ success: true, tourists: operationalTourists(await listTourists()) });
+    } catch (error: any) {
+      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    }
+  }
+
+  const targetId = requestedId || session.touristId;
+  if (!targetId) {
+    return NextResponse.json({ success: false, error: "A tourist ID is required." }, { status: 400 });
+  }
 
   if (!canAccessTouristData(session, targetId)) {
     return NextResponse.json(
@@ -21,31 +32,9 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    let tourist: any = await getTourist(targetId);
-
+    const tourist: any = await getTourist(targetId);
     if (!tourist) {
-      // Fallback mock object if database is initializing
-      tourist = {
-        touristId: targetId,
-        name: session.name || "Ralston",
-        nationality: "Indian",
-        identityStatus: "verified",
-        emergencyContacts: [
-          { name: "Ananya Sharma", phone: "+91 98765 43210", relationship: "Sister" },
-          { name: "Rajesh Kumar", phone: "+91 98123 45678", relationship: "Friend" },
-        ],
-        accommodation: {
-          hotelName: "Heritage Palace Resort",
-          address: "Amer Road, Pink City",
-          city: "Jaipur",
-        },
-        preferences: {
-          language: "English",
-          notificationMode: "push",
-        },
-        trackingConsent: true,
-        createdAt: new Date(),
-      };
+      return NextResponse.json({ success: false, error: "Tourist not found." }, { status: 404 });
     }
 
     return NextResponse.json({ success: true, tourist });
@@ -62,7 +51,11 @@ export async function PATCH(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { touristId = session.touristId || "TOUR-7890", trackingConsent, preferences } = body;
+    const { trackingConsent, preferences } = body;
+    const touristId = body.touristId ?? session.touristId;
+    if (!touristId) {
+      return NextResponse.json({ success: false, error: "A tourist ID is required." }, { status: 400 });
+    }
 
     if (!canAccessTouristData(session, touristId)) {
       return NextResponse.json(
@@ -81,4 +74,3 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
-

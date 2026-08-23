@@ -1,56 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { listActiveGeofences, insertGeofence } from "@/lib/db";
 import { requireAuth } from "@/lib/auth/guards";
+import { operationalGeofences } from "@/lib/operationalData";
 
 export async function GET() {
   try {
-    let geofences: any[] = await listActiveGeofences();
-
-    if (geofences.length === 0) {
-      // Fallback mock geofences
-      geofences = [
-        {
-          name: "Pink City Central Safe Zone",
-          type: "safe_zone",
-          geometry: {
-            type: "Polygon",
-            coordinates: [
-              [
-                [75.78, 26.91],
-                [75.83, 26.91],
-                [75.83, 26.95],
-                [75.78, 26.95],
-                [75.78, 26.91],
-              ],
-            ],
-          },
-          severity: "low",
-          active: true,
-          metadata: { description: "High security tourist hub with 24/7 patrol" },
-        },
-        {
-          name: "Nahargarh Cliff Restricted Area",
-          type: "restricted",
-          geometry: {
-            type: "Polygon",
-            coordinates: [
-              [
-                [75.81, 26.935],
-                [75.825, 26.935],
-                [75.825, 26.948],
-                [75.81, 26.948],
-                [75.81, 26.935],
-              ],
-            ],
-          },
-          severity: "high",
-          active: true,
-          metadata: { description: "Steep terrain; unauthorized access after 7 PM prohibited" },
-        },
-      ];
-    }
-
-    return NextResponse.json({ success: true, geofences });
+    return NextResponse.json({ success: true, geofences: operationalGeofences(await listActiveGeofences()) });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
@@ -83,9 +38,11 @@ export async function POST(request: NextRequest) {
     };
 
     const saved = await insertGeofence(newGeofence as any);
-    return NextResponse.json({ success: true, geofence: saved ?? newGeofence });
+    if (!saved) {
+      return NextResponse.json({ success: false, error: 'The geofence could not be saved.' }, { status: 503 });
+    }
+    return NextResponse.json({ success: true, geofence: saved });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message || 'Error creating geofence' }, { status: 500 });
   }
 }
-

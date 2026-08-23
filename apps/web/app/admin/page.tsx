@@ -1,721 +1,499 @@
 'use client';
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
-  ShieldAlert,
-  Users,
   AlertTriangle,
+  CheckCircle2,
+  CircleAlert,
+  FileText,
+  LogOut,
+  Plus,
   Radio,
   RefreshCw,
-  Plus,
-  Search,
-  Eye,
-  Send,
-  PhoneCall,
-  History,
-  Shirt,
-  FileText,
-  Lock,
-  Layers,
-  MapPin,
+  UserRound,
+  Users,
   X,
-  CheckCircle2,
-  Clock,
-  Ban,
-  LogOut,
-  User,
 } from 'lucide-react';
 import MapView from '@/components/maps/MapView';
 import IncidentQueue from '@/components/authority/IncidentQueue';
-import IncidentDetailModal from '@/components/authority/IncidentDetailModal';
-import { getSocket } from '@/lib/socket';
-import ThemeToggle from '@/components/ui/ThemeToggle';
+import { subscribeToPrahariLive } from '@/lib/supabaseRealtime';
+
+type DashboardStats = {
+  activeTourists: number;
+  liveIncidents: number;
+  highRiskZones: number;
+  respondersAvailable: number;
+  respondersTotal: number;
+};
+
+function coordinatesForDisplay(location?: { lat?: number; lng?: number } | null) {
+  if (typeof location?.lat !== 'number' || typeof location?.lng !== 'number') return 'Not reported';
+  return `${location.lat.toFixed(4)}, ${location.lng.toFixed(4)}`;
+}
+
+function isAvailable(responder: any) {
+  return String(responder.status ?? '').toLowerCase() === 'available';
+}
+
+function hasRecentLocation(timestamp?: string) {
+  const reportedAt = timestamp ? new Date(timestamp).getTime() : Number.NaN;
+  const ageMs = Date.now() - reportedAt;
+  return Number.isFinite(reportedAt) && ageMs >= -60_000 && ageMs <= 5 * 60_000;
+}
 
 export default function AdminPage() {
   const [currentUser, setCurrentUser] = useState<any | null>(null);
   const [incidents, setIncidents] = useState<any[]>([]);
   const [geofences, setGeofences] = useState<any[]>([]);
   const [responders, setResponders] = useState<any[]>([]);
-  const [stats, setStats] = useState<{
-    activeTourists: number; liveIncidents: number;
-    highRiskZones: number; respondersAvailable: number; respondersTotal: number;
-  } | null>(null);
-  const [touristPos, setTouristPos] = useState<{ lat: number; lng: number } | null>(null);
+  const [liveLocations, setLiveLocations] = useState<Record<string, { touristId: string; lat: number; lng: number; timestamp?: string }>>({});
+  const [stats, setStats] = useState<DashboardStats | null>(null);
   const [selectedIncident, setSelectedIncident] = useState<any | null>(null);
-  const [investigationMode, setInvestigationMode] = useState<any | null>(null);
-  const [showGeofenceModal, setShowGeofenceModal] = useState(false);
-  const [loading, setLoading] = useState(true);
-
-  // Socket.IO realtime state
-  const [socketConnected, setSocketConnected] = useState(false);
-
-  // Investigation mode live data
-  const [investigationData, setInvestigationData] = useState<{
-    tourist: any | null;
-    locations: any[];
-    loading: boolean;
-  }>({ tourist: null, locations: [], loading: false });
-
-  // E-FIR review state
-  const [efirs, setEfirs] = useState<any[]>([]);
-  const [efirLoading, setEfirLoading] = useState(false);
-
-  // New Geofence Form State
-  const [newGf, setNewGf] = useState({
-    name: 'Temporary Disaster Risk Zone B',
-    type: 'high_risk',
-    severity: 'critical',
-    description: 'Flash flood alert active around riverbed',
+  const [investigationData, setInvestigationData] = useState<{ tourist: any | null; locations: any[]; loading: boolean }>({
+    tourist: null,
+    locations: [],
+    loading: false,
   });
+  const [efirs, setEfirs] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [efirLoading, setEfirLoading] = useState(false);
+  const [socketConnected, setSocketConnected] = useState(false);
+  const [realtimeDelivery, setRealtimeDelivery] = useState<'checking' | 'verified' | 'fallback'>('checking');
+  const [showGeofenceForm, setShowGeofenceForm] = useState(false);
+  const [geofenceError, setGeofenceError] = useState<string | null>(null);
+  const [geofenceSaving, setGeofenceSaving] = useState(false);
+  const [geofenceForm, setGeofenceForm] = useState({
+    name: '',
+    type: 'high_risk',
+    severity: 'high',
+    description: '',
+    coordinates: '',
+  });
+  const realtimeProbeNonce = useRef<string | null>(null);
+  const realtimeProbeTimer = useRef<number | null>(null);
 
-  const fetchDashboardData = async () => {
+  const verifyRealtimeDelivery = useCallback(async () => {
+    if (realtimeProbeTimer.current) window.clearTimeout(realtimeProbeTimer.current);
+    const nonce = crypto.randomUUID().replaceAll('-', '');
+    realtimeProbeNonce.current = nonce;
+    setRealtimeDelivery('checking');
     try {
-      setLoading(true);
-      const [incRes, geoRes, statRes, respRes, locRes] = await Promise.all([
+      const response = await fetch('/api/realtime/probe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nonce }),
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !result?.delivery?.accepted) {
+        setRealtimeDelivery('fallback');
+        return;
+      }
+      realtimeProbeTimer.current = window.setTimeout(() => {
+        if (realtimeProbeNonce.current === nonce) setRealtimeDelivery('fallback');
+      }, 5_000);
+    } catch {
+      setRealtimeDelivery('fallback');
+    }
+  }, []);
+
+  const fetchEfirs = useCallback(async () => {
+    try {
+      setEfirLoading(true);
+      const response = await fetch('/api/efir');
+      const data = await response.json();
+      if (response.ok && data.success) setEfirs(data.efirs ?? []);
+    } catch (error) {
+      console.error('Unable to refresh E-FIR queue:', error);
+    } finally {
+      setEfirLoading(false);
+    }
+  }, []);
+
+  const fetchDashboardData = useCallback(async (silent = false) => {
+    try {
+      if (!silent) setLoading(true);
+      const [incRes, geoRes, statRes, responderRes, touristRes] = await Promise.all([
         fetch('/api/incidents'),
         fetch('/api/geofences'),
         fetch('/api/stats'),
         fetch('/api/responders'),
-        fetch('/api/locations?touristId=TOUR-7890'),
+        fetch('/api/tourists'),
+      ]);
+      const [incData, geoData, statData, responderData, touristData] = await Promise.all([
+        incRes.json(), geoRes.json(), statRes.json(), responderRes.json(), touristRes.json(),
       ]);
 
-      const incData = await incRes.json();
-      const geoData = await geoRes.json();
-      const statData = await statRes.json();
-      const respData = await respRes.json();
-      const locData = await locRes.json();
-
-      if (statData.stats) setStats(statData.stats);
-
-      if (respData.responders) {
-        setResponders(
-          respData.responders
-            .map((r: any) => ({
-              id: r.id ?? r.responderId,
-              unitId: r.unitId ?? r.responderId,
-              name: r.name ?? `${r.department ?? 'Unit'} ${r.responderId ?? ''}`.trim(),
-              lat: r.location?.lat,
-              lng: r.location?.lng,
-              type: r.type ?? r.department ?? 'POLICE',
-            }))
-            .filter((r: any) => typeof r.lat === 'number' && typeof r.lng === 'number')
+      if (incRes.ok && incData.success) setIncidents(incData.incidents ?? []);
+      if (geoRes.ok && geoData.success) {
+        setGeofences((geoData.geofences ?? []).map((geofence: any) => ({
+          id: geofence.id ?? geofence.name,
+          name: geofence.name,
+          coordinates: geofence.coordinates ?? geofence.geometry?.coordinates?.[0] ?? [],
+          severity: geofence.severity,
+        })));
+      }
+      if (statRes.ok && statData.success) setStats(statData.stats);
+      if (responderRes.ok && responderData.success) {
+        setResponders((responderData.responders ?? []).map((responder: any) => ({
+          id: responder.id ?? responder.responderId,
+          unitId: responder.unitId ?? responder.responderId,
+          name: responder.name ?? responder.responderId ?? 'Unnamed responder',
+          status: responder.status,
+          lat: responder.location?.lat,
+          lng: responder.location?.lng,
+          type: responder.type ?? responder.department,
+        })).filter((responder: any) => typeof responder.lat === 'number' && typeof responder.lng === 'number'));
+      }
+      if (touristRes.ok && touristData.success) {
+        const reportedLocations = Object.fromEntries(
+          (touristData.tourists ?? [])
+            .filter((tourist: any) => tourist.trackingConsent !== false && typeof tourist.currentLocation?.lat === 'number' && typeof tourist.currentLocation?.lng === 'number' && hasRecentLocation(tourist.currentLocation.timestamp))
+            .map((tourist: any) => [tourist.touristId, {
+              touristId: tourist.touristId,
+              lat: tourist.currentLocation.lat,
+              lng: tourist.currentLocation.lng,
+              timestamp: tourist.currentLocation.timestamp,
+            }])
         );
+        setLiveLocations(reportedLocations);
       }
-
-      // Latest known position of the tracked tourist (drives the map marker).
-      const latest = locData?.history?.[0];
-      if (latest?.coordinates?.lat != null) {
-        setTouristPos({ lat: latest.coordinates.lat, lng: latest.coordinates.lng });
-      }
-
-      if (incData.incidents) setIncidents(incData.incidents);
-      if (geoData.geofences) {
-        setGeofences(
-          geoData.geofences.map((g: any) => ({
-            id: g.id || g.name,
-            name: g.name,
-            coordinates: g.coordinates || g.geometry?.coordinates?.[0]?.map(([lng, lat]: [number, number]) => [lat, lng]) || [],
-            severity: g.severity || 'high',
-          }))
-        );
-      }
-    } catch (err) {
-      console.error('Error fetching dashboard data:', err);
+    } catch (error) {
+      console.error('Unable to refresh authority dashboard:', error);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchDashboardData();
-    // Fetch authenticated user session
-    fetch('/api/auth/me')
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.authenticated && d.user) setCurrentUser(d.user);
-      })
+    void fetchDashboardData();
+    void fetchEfirs();
+    void fetch('/api/auth/me')
+      .then((response) => response.json())
+      .then((data) => { if (data.authenticated && data.user) setCurrentUser(data.user); })
       .catch(() => {});
-  }, []);
 
-  // ── Socket.IO realtime subscription (#21) ────────────────────────
-  useEffect(() => {
-    const socket = getSocket();
+    const refreshTimer = window.setInterval(() => void fetchDashboardData(true), 15_000);
+    return () => window.clearInterval(refreshTimer);
+  }, [fetchDashboardData, fetchEfirs]);
 
-    const onConnect = () => setSocketConnected(true);
-    const onDisconnect = () => setSocketConnected(false);
-
-    const onIncidentCreated = (incident: any) => {
-      setIncidents((prev) => {
-        // Dedup: don't add if already present
-        if (prev.some((i) => i.incidentId === incident.incidentId)) return prev;
-        return [incident, ...prev];
-      });
-    };
-
-    const onIncidentUpdated = (incident: any) => {
-      setIncidents((prev) =>
-        prev.map((i) => (i.incidentId === incident.incidentId ? { ...i, ...incident } : i))
-      );
-    };
-
-    const onTouristLocation = (loc: any) => {
-      if (loc?.lat != null && loc?.lng != null) {
-        setTouristPos({ lat: loc.lat, lng: loc.lng });
+  useEffect(() => subscribeToPrahariLive({
+    onConnectionChange: (connected) => {
+      setSocketConnected(connected);
+      if (connected) void verifyRealtimeDelivery();
+      else setRealtimeDelivery('fallback');
+    },
+    onIncidentCreated: () => { void fetchDashboardData(true); void fetchEfirs(); },
+    onIncidentUpdated: () => { void fetchDashboardData(true); void fetchEfirs(); },
+    onTouristLocation: () => void fetchDashboardData(true),
+    onProbe: (probe: any) => {
+      if (probe?.nonce && probe.nonce === realtimeProbeNonce.current) {
+        if (realtimeProbeTimer.current) window.clearTimeout(realtimeProbeTimer.current);
+        setRealtimeDelivery('verified');
       }
-    };
+    },
+  }), [fetchDashboardData, fetchEfirs, verifyRealtimeDelivery]);
 
-    socket.on('connect', onConnect);
-    socket.on('disconnect', onDisconnect);
-    socket.on('incident:created', onIncidentCreated);
-    socket.on('incident:updated', onIncidentUpdated);
-    socket.on('tourist:location', onTouristLocation);
-
-    if (socket.connected) setSocketConnected(true);
-
-    return () => {
-      socket.off('connect', onConnect);
-      socket.off('disconnect', onDisconnect);
-      socket.off('incident:created', onIncidentCreated);
-      socket.off('incident:updated', onIncidentUpdated);
-      socket.off('tourist:location', onTouristLocation);
-    };
+  useEffect(() => () => {
+    if (realtimeProbeTimer.current) window.clearTimeout(realtimeProbeTimer.current);
   }, []);
 
-  // ── Fetch E-FIRs for review panel (#25) ──────────────────────────
-  const fetchEfirs = async () => {
-    try {
-      setEfirLoading(true);
-      const res = await fetch('/api/efir');
-      const data = await res.json();
-      if (data.success && data.efirs) setEfirs(data.efirs);
-    } catch (err) {
-      console.error('Error fetching E-FIRs:', err);
-    } finally {
-      setEfirLoading(false);
-    }
-  };
-
-  useEffect(() => { fetchEfirs(); }, []);
-
-  // ── Investigation mode: fetch live data (#23) ────────────────────
   useEffect(() => {
-    if (!investigationMode) {
+    if (!selectedIncident?.touristId) {
       setInvestigationData({ tourist: null, locations: [], loading: false });
       return;
     }
-    const tid = investigationMode.touristId;
-    if (!tid) return;
 
-    setInvestigationData((prev) => ({ ...prev, loading: true }));
-
+    let cancelled = false;
+    setInvestigationData((previous) => ({ ...previous, loading: true }));
     Promise.all([
-      fetch(`/api/tourists/${tid}`).then((r) => r.json()).catch(() => null),
-      fetch(`/api/locations?touristId=${tid}`).then((r) => r.json()).catch(() => null),
-    ]).then(([touristRes, locRes]) => {
-      setInvestigationData({
-        tourist: touristRes?.tourist ?? touristRes ?? null,
-        locations: locRes?.history ?? [],
-        loading: false,
-      });
+      fetch(`/api/tourists/${encodeURIComponent(selectedIncident.touristId)}`).then((response) => response.json()).catch(() => null),
+      fetch(`/api/locations?touristId=${encodeURIComponent(selectedIncident.touristId)}`).then((response) => response.json()).catch(() => null),
+    ]).then(([touristResult, locationResult]) => {
+      if (!cancelled) {
+        setInvestigationData({
+          tourist: touristResult?.success ? touristResult.tourist : null,
+          locations: locationResult?.success ? locationResult.history ?? [] : [],
+          loading: false,
+        });
+      }
     });
-  }, [investigationMode?.touristId]);
+    return () => { cancelled = true; };
+  }, [selectedIncident?.touristId]);
 
-  // ── E-FIR approve/reject handler (#25) ──────────────────────────
+  const handleDispatch = async () => {
+    if (!selectedIncident) return;
+    const responder = responders.find((item) => isAvailable(item));
+    if (!responder) {
+      window.alert('No available responder with a reported location is currently on record. This incident remains unassigned.');
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/incidents', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          incidentId: selectedIncident.incidentId,
+          status: 'DISPATCHED',
+          assignedResponderUnitId: responder.unitId,
+          assignedResponderName: responder.name,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error ?? 'Unable to dispatch responder.');
+      setSelectedIncident(data.incident);
+      void fetchDashboardData(true);
+    } catch (error: any) {
+      window.alert(error.message ?? 'Unable to dispatch responder.');
+    }
+  };
+
   const handleEfirAction = async (incidentId: string, action: 'APPROVE' | 'REJECT') => {
     try {
-      const res = await fetch('/api/efir', {
+      const response = await fetch('/api/efir', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          incidentId,
-          action,
-          officerName: 'Authority Officer',
-          officerBadge: 'AUTH-001',
-        }),
+        body: JSON.stringify({ incidentId, action }),
       });
-      const data = await res.json();
-      if (data.success) {
-        // Refresh the E-FIR list
-        fetchEfirs();
-        alert(`E-FIR ${action === 'APPROVE' ? 'approved' : 'rejected'} successfully.`);
-      } else {
-        alert(`E-FIR action failed: ${data.error}`);
-      }
-    } catch (err) {
-      console.error('E-FIR action failed:', err);
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error ?? 'Unable to update E-FIR.');
+      await fetchEfirs();
+    } catch (error: any) {
+      window.alert(error.message ?? 'Unable to update E-FIR.');
     }
   };
 
-  const handleDispatchAction = async (incidentId: string) => {
-    // Pick the nearest available responder we actually have on record.
-    const inc = incidents.find((i) => i.incidentId === incidentId);
-    const unit =
-      responders.find((r) => r.unitId === inc?.assignedResponderUnitId) ?? responders[0] ?? null;
+  const handleCreateGeofence = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setGeofenceError(null);
 
-    try {
-      const res = await fetch('/api/incidents', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          incidentId,
-          status: 'DISPATCHED',
-          ...(unit ? { assignedResponderUnitId: unit.unitId, assignedResponderName: unit.name } : {}),
-        }),
-      });
-      const data = await res.json();
+    const coordinates = geofenceForm.coordinates
+      .split(/\n|;/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => line.split(',').map((value) => Number(value.trim())));
 
-      if (!data.success) {
-        alert(`Dispatch failed: ${data.error ?? 'unknown error'}`);
-        return;
-      }
-
-      // Reflect the persisted row rather than guessing.
-      setIncidents((prev) =>
-        prev.map((i) => (i.incidentId === incidentId ? { ...i, ...data.incident } : i))
-      );
-      setSelectedIncident(null);
-      alert(
-        `Dispatch confirmed for ${incidentId}` +
-          (unit ? ` — ${unit.unitId} (${unit.name}) notified.` : '. No responder unit on record.')
-      );
-    } catch (err) {
-      console.error('Dispatch failed:', err);
-      alert('Dispatch failed — could not reach the server.');
+    const validCoordinates = coordinates.length >= 3 && coordinates.every(
+      ([lat, lng]) => Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180
+    );
+    if (!validCoordinates) {
+      setGeofenceError('Enter at least three valid latitude, longitude pairs—one pair per line.');
+      return;
     }
-  };
 
-  const handleCreateGeofence = async (e: React.FormEvent) => {
-    e.preventDefault();
+    const closedCoordinates = [...coordinates] as Array<[number, number]>;
+    const first = closedCoordinates[0];
+    const last = closedCoordinates[closedCoordinates.length - 1];
+    if (first[0] !== last[0] || first[1] !== last[1]) closedCoordinates.push(first);
+
     try {
-      const res = await fetch('/api/geofences', {
+      setGeofenceSaving(true);
+      const response = await fetch('/api/geofences', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...newGf,
-          coordinates: [
-            [19.070, 72.870],
-            [19.085, 72.870],
-            [19.085, 72.890],
-            [19.070, 72.890],
-            [19.070, 72.870],
-          ],
+          name: geofenceForm.name.trim(),
+          type: geofenceForm.type,
+          severity: geofenceForm.severity,
+          description: geofenceForm.description.trim(),
+          coordinates: closedCoordinates,
         }),
       });
-      const data = await res.json();
-      if (data.success) {
-        setShowGeofenceModal(false);
-        fetchDashboardData();
-      }
-    } catch (err) {
-      console.error(err);
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error ?? 'Unable to create geofence.');
+      setShowGeofenceForm(false);
+      setGeofenceForm({ name: '', type: 'high_risk', severity: 'high', description: '', coordinates: '' });
+      await fetchDashboardData(true);
+    } catch (error: any) {
+      setGeofenceError(error.message ?? 'Unable to create geofence.');
+    } finally {
+      setGeofenceSaving(false);
     }
   };
 
+  const liveIncidents = incidents.filter((incident) => !['resolved', 'cancelled', 'rejected'].includes(String(incident.status ?? '').toLowerCase()));
+  const mapIncidents = liveIncidents
+    .filter((incident) => typeof incident.location?.lat === 'number' && typeof incident.location?.lng === 'number')
+    .map((incident) => ({
+      id: incident.id ?? incident.incidentId,
+      incidentId: incident.incidentId,
+      type: incident.type,
+      lat: incident.location.lat,
+      lng: incident.location.lng,
+      severity: incident.severity,
+    }));
+
   return (
-    <main className="min-h-screen bg-bg text-ink p-4 md:p-8 max-w-7xl mx-auto space-y-6">
-      {/* Top Header */}
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b-2 border-line pb-4">
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="p-2.5 bg-accent text-accent-ink rounded-nb border-2 border-line shrink-0">
-            <ShieldAlert className="w-6 h-6" />
-          </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-xl md:text-2xl font-black text-ink tracking-tight leading-none">
-                Authority Command Center
-              </h1>
-              <span className="nb-chip nb-chip-accent">ADMIN VIEW</span>
-            </div>
-            <p className="text-xs text-ink-soft mt-1">
-              District Incident Dispatch • Dynamic Geofences • Blockchain Audit Log
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {currentUser && (
-            <div className="hidden lg:flex items-center gap-2 nb-chip normal-case tracking-normal">
-              <User className="w-3.5 h-3.5 text-accent" />
-              <span className="font-bold">{currentUser.name}</span>
-              <span className="text-accent-strong font-black">· {currentUser.role}</span>
-            </div>
-          )}
-
-          <button onClick={() => setShowGeofenceModal(true)} className="nb-btn nb-btn-danger text-xs">
-            <Plus className="w-4 h-4" /> <span className="hidden md:inline">Add Geofence</span>
+    <div className="minimal-page min-h-screen">
+      <header className="minimal-nav">
+        <Link href="/" className="text-xl font-semibold tracking-tight text-ink">Prahari</Link>
+        <div className="flex items-center gap-2 sm:gap-3">
+          {currentUser && <span className="hidden items-center gap-2 text-sm text-ink-soft md:flex"><UserRound size={15} className="text-sky-400" />{currentUser.name} · {currentUser.role}</span>}
+          <button onClick={() => void fetchDashboardData()} className="minimal-button minimal-button-secondary" disabled={loading}>
+            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} /><span className="hidden sm:inline">Refresh</span>
           </button>
-
-          <button onClick={fetchDashboardData} className="nb-btn nb-btn-ghost !border-2 text-xs">
-            <RefreshCw className={`w-4 h-4 text-success ${loading ? 'animate-spin' : ''}`} />
-            <span className="hidden md:inline">Refresh</span>
+          <button onClick={() => { setGeofenceError(null); setShowGeofenceForm(true); }} className="minimal-button minimal-button-secondary">
+            <Plus size={16} /><span className="hidden sm:inline">Add geofence</span>
           </button>
-
-          <Link href="/citizen" className="nb-btn text-xs" style={{ background: '#15a34a', color: '#fff' }}>
-            <span className="hidden sm:inline">Citizen View</span> →
-          </Link>
-
+          <Link href="/citizen" className="minimal-button minimal-button-primary">Citizen view</Link>
           <button
-            onClick={async () => {
-              await fetch('/api/auth/logout', { method: 'POST' });
-              window.location.href = '/login';
-            }}
-            title="Logout"
-            className="nb-btn nb-btn-ghost !border-2 h-9 w-9 !px-0"
-          >
-            <LogOut className="w-4 h-4" />
-          </button>
-
-          <ThemeToggle />
+            onClick={async () => { await fetch('/api/auth/logout', { method: 'POST' }); window.location.href = '/login'; }}
+            aria-label="Sign out"
+            className="minimal-button minimal-button-secondary px-3"
+          ><LogOut size={17} /></button>
         </div>
       </header>
 
-      {/* Summary Metrics Bar */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="nb-card p-4 rounded-nb border-2 border-line bg-surface/80 flex items-center gap-4">
-          <div className="p-3 bg-emerald-500/10 text-success rounded-nb border border-emerald-500/20">
-            <Users className="w-6 h-6" />
-          </div>
+      <main className="mx-auto w-full max-w-7xl px-5 py-10 sm:py-12">
+        <section className="flex flex-col justify-between gap-4 border-b border-line pb-7 sm:flex-row sm:items-end">
           <div>
-            <span className="text-xs text-ink-soft uppercase font-semibold block">Active Tourists</span>
-            <span className="text-2xl font-black font-mono text-ink">{stats ? stats.activeTourists : '—'}</span>
+            <p className="minimal-eyebrow">Authority workspace</p>
+            <h1 className="mt-2 text-3xl font-semibold tracking-[-0.035em] text-ink sm:text-4xl">Live safety operations</h1>
+            <p className="mt-3 max-w-2xl text-base leading-7 text-ink-soft">Only current records from the operational database are shown. Fixture and test records are excluded.</p>
           </div>
-        </div>
+          <span className={`inline-flex w-fit items-center gap-2 rounded-full border px-3 py-1.5 text-sm ${realtimeDelivery === 'verified' ? 'border-sky-400/40 bg-sky-400/10 text-sky-200' : 'border-slate-600 text-ink-soft'}`}>
+            <Radio size={14} />{realtimeDelivery === 'verified' ? 'Instant updates verified' : socketConnected && realtimeDelivery === 'checking' ? 'Checking live delivery…' : 'Syncing every 15 seconds'}
+          </span>
+        </section>
 
-        <div className="nb-card p-4 rounded-nb border border-red-500/30 bg-surface/80 flex items-center gap-4">
-          <div className="p-3 bg-red-500/10 text-danger rounded-nb border border-red-500/20">
-            <ShieldAlert className="w-6 h-6 animate-pulse" />
-          </div>
-          <div>
-            <span className="text-xs text-ink-soft uppercase font-semibold block">Live Incidents</span>
-            <span className="text-2xl font-black font-mono text-danger">{stats ? stats.liveIncidents : incidents.length}</span>
-          </div>
-        </div>
+        <section className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <Metric label="Registered travellers" value={stats?.activeTourists} icon={<Users size={20} />} />
+          <Metric label="Open incidents" value={stats?.liveIncidents} icon={<CircleAlert size={20} />} tone="text-rose-300" />
+          <Metric label="High-risk geofences" value={stats?.highRiskZones} icon={<AlertTriangle size={20} />} tone="text-amber-300" />
+          <Metric label="Available responders" value={stats ? `${stats.respondersAvailable}/${stats.respondersTotal}` : undefined} icon={<Radio size={20} />} />
+        </section>
 
-        <div className="nb-card p-4 rounded-nb border border-amber-500/30 bg-surface/80 flex items-center gap-4">
-          <div className="p-3 bg-amber-500/10 text-warning rounded-nb border border-amber-500/20">
-            <AlertTriangle className="w-6 h-6" />
-          </div>
-          <div>
-            <span className="text-xs text-ink-soft uppercase font-semibold block">High Risk Zones</span>
-            <span className="text-2xl font-black font-mono text-warning">{stats ? stats.highRiskZones : '—'}</span>
-          </div>
-        </div>
-
-        <div className="nb-card p-4 rounded-nb border border-blue-500/30 bg-surface/80 flex items-center gap-4">
-          <div className="p-3 bg-blue-500/10 text-accent rounded-nb border border-blue-500/20">
-            <Radio className="w-6 h-6" />
-          </div>
-          <div>
-            <span className="text-xs text-ink-soft uppercase font-semibold block">Responders</span>
-            <span className="text-2xl font-black font-mono text-accent">
-              {stats ? `${stats.respondersAvailable}/${stats.respondersTotal} AVAILABLE` : '—'}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* Main Split Grid: Spatial Map & Incident Queue */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left 2 Columns: Live Spatial Map */}
-        <div className="lg:col-span-2 nb-card rounded-nb p-4 border-2 border-line bg-surface/80 space-y-3">
-          <div className="flex items-center justify-between px-1">
-            <h3 className="font-bold text-ink text-sm flex items-center gap-2">
-              <Radio className="w-4 h-4 text-success animate-pulse" /> Live Incident & Responder Spatial Clusters
-            </h3>
-            <span className={`text-xs font-mono px-2 py-0.5 rounded border ${
-              socketConnected
-                ? 'text-success bg-emerald-500/10 border-emerald-500/20'
-                : 'text-danger bg-red-500/10 border-red-500/20'
-            }`}>
-              {socketConnected ? 'Gateway Connected' : 'Gateway Disconnected'}
-            </span>
-          </div>
-
-          <MapView
-            touristPos={touristPos}
-            geofences={geofences}
-            incidents={incidents.filter((inc) => inc.location?.lat != null).map((inc) => ({
-              id: inc.id || inc.incidentId,
-              incidentId: inc.incidentId,
-              type: inc.type,
-              lat: inc.location?.lat,
-              lng: inc.location?.lng,
-              severity: inc.severity,
-            }))}
-            responders={responders}
-          />
-        </div>
-
-        {/* Right Column: Active Incident Queue */}
-        <div>
-          <IncidentQueue
-            incidents={incidents}
-            selectedIncidentId={selectedIncident?.incidentId}
-            onSelectIncident={(inc) => {
-              setSelectedIncident(inc);
-              setInvestigationMode(inc);
-            }}
-          />
-        </div>
-      </div>
-
-      {/* Missing Tourist Investigation Mode Drawer — Live Data (#23) */}
-      {investigationMode && (
-        <div className="nb-card p-6 rounded-nb border border-blue-500/30 bg-surface/90 shadow-nb space-y-4">
-          <div className="flex items-center justify-between border-b-2 border-line pb-3">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-blue-500/20 text-accent rounded-nb border border-blue-500/30">
-                <Search className="w-5 h-5" />
-              </div>
+        <section className="mt-7 grid gap-5 xl:grid-cols-[minmax(0,1.65fr)_minmax(340px,0.85fr)]">
+          <div className="minimal-card p-5 sm:p-6">
+            <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h3 className="font-bold text-ink text-base">
-                  MISSING TOURIST INVESTIGATION MODE — Ticket {investigationMode.incidentId}
-                </h3>
-                <p className="text-xs text-ink-soft font-mono">Consented Emergency Access • Verified Identity Credentials</p>
+                <h2 className="text-lg font-semibold text-ink">Operations map</h2>
+                <p className="mt-1 text-sm text-ink-soft">Consented locations, active incidents, responder positions, and published geofences.</p>
               </div>
+              <span className="text-sm text-ink-soft">{Object.keys(liveLocations).length} reporting traveller{Object.keys(liveLocations).length === 1 ? '' : 's'}</span>
             </div>
-            <button
-              onClick={() => setInvestigationMode(null)}
-              className="text-ink-soft hover:text-white p-1 bg-surface-2 rounded-nb cursor-pointer"
-            >
-              <X className="w-5 h-5" />
-            </button>
+            <MapView liveTourists={Object.values(liveLocations)} geofences={geofences} incidents={mapIncidents} responders={responders} />
+          </div>
+          <IncidentQueue incidents={liveIncidents} selectedIncidentId={selectedIncident?.incidentId} onSelectIncident={setSelectedIncident} />
+        </section>
+
+        {selectedIncident && (
+          <section className="minimal-card mt-7 p-5 sm:p-6">
+            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-line pb-5">
+              <div>
+                <p className="minimal-eyebrow">Incident review</p>
+                <h2 className="mt-1 text-xl font-semibold text-ink">{selectedIncident.incidentId}</h2>
+                <p className="mt-2 text-sm text-ink-soft">{selectedIncident.type} · Reported at {coordinatesForDisplay(selectedIncident.location)}</p>
+              </div>
+              <button onClick={() => setSelectedIncident(null)} className="minimal-button minimal-button-secondary px-3" aria-label="Close incident review"><X size={17} /></button>
+            </div>
+
+            {investigationData.loading ? (
+              <div className="flex min-h-40 items-center justify-center gap-2 text-sm text-ink-soft"><RefreshCw size={16} className="animate-spin" />Loading authorised record…</div>
+            ) : (
+              <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <InfoCard label="Traveller" value={investigationData.tourist?.name ?? selectedIncident.touristName ?? selectedIncident.touristId ?? 'Not recorded'} detail={investigationData.tourist?.did ?? 'No credential DID on record'} />
+                <InfoCard label="Identity status" value={investigationData.tourist?.identityStatus ? String(investigationData.tourist.identityStatus).replaceAll('_', ' ') : 'Not recorded'} detail={investigationData.tourist?.nationality ?? 'Nationality not recorded'} />
+                <InfoCard label="Location history" value={investigationData.locations.length ? `${investigationData.locations.length} recorded ping${investigationData.locations.length === 1 ? '' : 's'}` : 'No recorded location history'} detail={investigationData.locations[0] ? coordinatesForDisplay(investigationData.locations[0].coordinates ?? investigationData.locations[0]) : undefined} />
+                <InfoCard label="Responder" value={selectedIncident.assignedResponderUnitId ?? 'Unassigned'} detail={selectedIncident.etaMinutes != null ? `ETA ${selectedIncident.etaMinutes} min` : 'No ETA reported'} />
+              </div>
+            )}
+
+            <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-5">
+              <p className="text-sm text-ink-soft">Emergency contacts and additional identity data are shown only through the authorised investigation record.</p>
+              <button onClick={handleDispatch} className="minimal-button minimal-button-primary" disabled={!responders.some(isAvailable)}>Dispatch available responder</button>
+            </div>
+          </section>
+        )}
+
+        <section className="minimal-card mt-7 p-5 sm:p-6">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-5">
+            <div>
+              <h2 className="flex items-center gap-2 text-lg font-semibold text-ink"><FileText size={19} className="text-sky-400" />E-FIR review</h2>
+              <p className="mt-1 text-sm text-ink-soft">Reports submitted from real incident records only.</p>
+            </div>
+            <button onClick={() => void fetchEfirs()} className="minimal-button minimal-button-secondary" disabled={efirLoading}><RefreshCw size={16} className={efirLoading ? 'animate-spin' : ''} />Refresh</button>
           </div>
 
-          {investigationData.loading ? (
-            <div className="py-8 flex items-center justify-center text-ink-soft">
-              <RefreshCw className="w-5 h-5 animate-spin mr-2" /> Loading investigation data...
-            </div>
+          {efirs.length === 0 ? (
+            <div className="py-12 text-center"><p className="font-medium text-ink">No E-FIR reports to review</p><p className="mt-2 text-sm text-ink-soft">New, authenticated reports will appear here.</p></div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-              {/* Identity & DID — real data */}
-              <div className="bg-surface-2 p-4 rounded-nb border-2 border-line space-y-2">
-                <span className="font-bold text-accent block uppercase tracking-wider">Identity Profile</span>
-                <div><span className="text-ink-soft">Tourist ID:</span> <strong className="text-ink font-mono">{investigationMode.touristId}</strong></div>
-                <div><span className="text-ink-soft">Name:</span> <strong className="text-ink">{investigationData.tourist?.name || investigationMode.touristName || 'Unknown'}</strong></div>
-                <div><span className="text-ink-soft">W3C Credential DID:</span> <span className="font-mono text-success block text-[11px]">{investigationData.tourist?.did || 'No DID issued'}</span></div>
-                <div><span className="text-ink-soft">Identity Status:</span> <span className={`font-mono font-bold text-[11px] ${investigationData.tourist?.identityStatus === 'verified' ? 'text-success' : 'text-warning'}`}>{(investigationData.tourist?.identityStatus || 'unknown').toUpperCase()}</span></div>
-                <div><span className="text-ink-soft">Nationality:</span> <span className="text-ink">{investigationData.tourist?.nationality || 'N/A'}</span></div>
-              </div>
-
-              {/* AI Visual Clothing Profile — real data */}
-              <div className="bg-surface-2 p-4 rounded-nb border-2 border-line space-y-2">
-                <span className="font-bold text-accent flex items-center gap-1 uppercase tracking-wider">
-                  <Shirt className="w-4 h-4" /> AI Attire Description
-                </span>
-                {investigationData.tourist?.clothingProfile ? (
-                  <p className="text-ink-soft font-mono text-[11px] leading-relaxed whitespace-pre-line">
-                    {typeof investigationData.tourist.clothingProfile === 'object'
-                      ? Object.entries(investigationData.tourist.clothingProfile)
-                          .map(([k, v]) => `${k}: ${v}`)
-                          .join('\n')
-                      : String(investigationData.tourist.clothingProfile)}
-                  </p>
-                ) : (
-                  <p className="text-ink-soft italic text-[11px]">No attire record on file</p>
-                )}
-              </div>
-
-              {/* Movement History — real data */}
-              <div className="bg-surface-2 p-4 rounded-nb border-2 border-line space-y-2">
-                <span className="font-bold text-success flex items-center gap-1 uppercase tracking-wider">
-                  <MapPin className="w-4 h-4" /> Movement History
-                </span>
-                {investigationData.locations.length > 0 ? (
-                  <div className="text-[11px] font-mono text-ink-soft space-y-1 max-h-32 overflow-y-auto">
-                    {investigationData.locations.slice(0, 10).map((loc: any, i: number) => (
-                      <div key={i} className="flex justify-between">
-                        <span className="text-ink">
-                          {loc.coordinates?.lat?.toFixed(4) ?? loc.lat?.toFixed(4)}, {loc.coordinates?.lng?.toFixed(4) ?? loc.lng?.toFixed(4)}
-                        </span>
-                        <span className="text-ink-soft">
-                          {loc.timestamp ? new Date(loc.timestamp).toLocaleTimeString() : ''}
-                        </span>
+            <div className="divide-y divide-slate-700/70">
+              {efirs.map((efir) => {
+                const incidentId = efir._incidentId ?? efir.incidentId;
+                const pending = efir.policeVerification === 'PENDING_OFFICER_APPROVAL';
+                const verified = efir.policeVerification === 'OFFICER_VERIFIED';
+                return (
+                  <article key={efir.efirId} className="py-5 first:pt-6">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <h3 className="font-mono text-sm font-semibold text-ink">{efir.efirId}</h3>
+                        <p className="mt-1 text-sm text-ink-soft">{incidentId} · {efir.incidentType ?? 'Incident type not recorded'}</p>
                       </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-ink-soft italic text-[11px]">No location history available</p>
-                )}
-                {investigationData.locations.length > 0 && (
-                  <div className="text-[10px] text-ink-soft pt-1 border-t-2 border-line">
-                    Showing {Math.min(10, investigationData.locations.length)} of {investigationData.locations.length} pings
-                  </div>
-                )}
-              </div>
+                      <span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${pending ? 'border-amber-400/40 text-amber-200' : verified ? 'border-emerald-400/40 text-emerald-200' : 'border-rose-400/40 text-rose-200'}`}>{pending ? 'Awaiting review' : verified ? 'Verified' : 'Rejected'}</span>
+                    </div>
+                    <div className="mt-4 grid gap-2 text-sm text-ink-soft sm:grid-cols-2">
+                      <p>Complainant: <span className="text-ink">{efir.touristName ?? 'Not recorded'}</span></p>
+                      <p>Filed: <span className="text-ink">{efir.createdAt ? new Date(efir.createdAt).toLocaleString() : 'Not recorded'}</span></p>
+                      <p>Location: <span className="font-mono text-ink">{coordinatesForDisplay(efir.location)}</span></p>
+                      {efir.blockchainEvidence && <p>Evidence: <span className="text-ink">{efir.blockchainEvidence.status}</span></p>}
+                    </div>
+                    {pending && <div className="mt-4 flex gap-2"><button onClick={() => void handleEfirAction(incidentId, 'APPROVE')} className="minimal-button minimal-button-primary">Approve</button><button onClick={() => void handleEfirAction(incidentId, 'REJECT')} className="minimal-button minimal-button-secondary">Reject</button></div>}
+                  </article>
+                );
+              })}
             </div>
           )}
-        </div>
-      )}
+        </section>
+      </main>
 
-      {/* E-FIR Officer Review Panel (#25) */}
-      <div className="nb-card p-5 rounded-nb border-2 border-line bg-surface/80 space-y-4">
-        <div className="flex items-center justify-between border-b-2 border-line pb-3">
-          <h3 className="font-bold text-ink text-sm flex items-center gap-2">
-            <FileText className="w-4 h-4 text-warning" /> E-FIR Officer Verification Queue
-          </h3>
-          <button
-            onClick={fetchEfirs}
-            className="flex items-center gap-1.5 px-2.5 py-1 bg-surface-2 hover:bg-surface-2 rounded-nb text-xs text-ink-soft font-mono cursor-pointer"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${efirLoading ? 'animate-spin' : ''}`} /> Refresh
-          </button>
-        </div>
-
-        {efirs.length === 0 ? (
-          <div className="py-6 text-center text-ink-soft text-sm">
-            No E-FIR drafts pending review.
-          </div>
-        ) : (
-          <div className="space-y-3 max-h-80 overflow-y-auto">
-            {efirs.map((efir: any) => {
-              const isPending = efir.policeVerification === 'PENDING_OFFICER_APPROVAL';
-              const isVerified = efir.policeVerification === 'OFFICER_VERIFIED';
-              const isRejected = efir.policeVerification === 'REJECTED';
-              const incidentId = efir._incidentId || efir.incidentId;
-
-              return (
-                <div
-                  key={efir.efirId}
-                  className={`p-4 rounded-nb border text-xs ${
-                    isPending
-                      ? 'bg-amber-950/30 border-amber-500/30'
-                      : isVerified
-                      ? 'bg-emerald-950/30 border-emerald-500/30'
-                      : 'bg-red-950/30 border-red-500/30'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold font-mono text-ink">{efir.efirId}</span>
-                      <span className="text-ink-soft">•</span>
-                      <span className="text-ink-soft font-mono">{incidentId}</span>
-                    </div>
-                    <span className={`px-2 py-0.5 rounded font-bold font-mono text-[11px] ${
-                      isPending ? 'bg-amber-500/20 text-warning' :
-                      isVerified ? 'bg-emerald-500/20 text-success' :
-                      'bg-red-500/20 text-danger'
-                    }`}>
-                      {isPending ? 'PENDING' : isVerified ? 'VERIFIED' : 'REJECTED'}
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2 text-ink-soft mb-3">
-                    <div>Complainant: <strong className="text-ink">{efir.touristName}</strong></div>
-                    <div>Incident: <strong className="text-ink">{efir.incidentType}</strong></div>
-                    <div>Location: <span className="text-ink-soft font-mono">{efir.location?.lat?.toFixed(4)}, {efir.location?.lng?.toFixed(4)}</span></div>
-                    <div>Filed: <span className="text-ink-soft">{efir.createdAt ? new Date(efir.createdAt).toLocaleString() : 'N/A'}</span></div>
-                  </div>
-
-                  {efir.verifiedBy && (
-                    <div className="text-[11px] text-ink-soft mb-2 font-mono">
-                      {isVerified ? 'Approved' : 'Rejected'} by: {efir.verifiedBy} at {efir.verifiedAt ? new Date(efir.verifiedAt).toLocaleString() : ''}
-                      {efir.remarks && <span className="block text-ink-soft mt-0.5">Remarks: {efir.remarks}</span>}
-                    </div>
-                  )}
-
-                  {isPending && (
-                    <div className="flex items-center gap-2 pt-2 border-t-2 border-line">
-                      <button
-                        onClick={() => handleEfirAction(incidentId, 'APPROVE')}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-nb transition cursor-pointer"
-                      >
-                        <CheckCircle2 className="w-3.5 h-3.5" /> APPROVE
-                      </button>
-                      <button
-                        onClick={() => handleEfirAction(incidentId, 'REJECT')}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white font-bold rounded-nb transition cursor-pointer"
-                      >
-                        <Ban className="w-3.5 h-3.5" /> REJECT
-                      </button>
-                    </div>
-                  )}
+      {showGeofenceForm && (
+        <div className="fixed inset-0 z-[3000] overflow-y-auto bg-slate-950/80 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="geofence-dialog-title">
+          <div className="flex min-h-full items-center justify-center py-6">
+            <form onSubmit={handleCreateGeofence} className="relative z-[3100] w-full max-w-xl rounded-2xl border border-slate-600 bg-[#2a2b2e] p-5 shadow-2xl sm:p-7">
+              <div className="flex items-start justify-between gap-4 border-b border-line pb-5">
+                <div>
+                  <p className="minimal-eyebrow">Live operations</p>
+                  <h2 id="geofence-dialog-title" className="mt-1 text-xl font-semibold text-ink">Add geofence</h2>
+                  <p className="mt-2 text-sm leading-6 text-ink-soft">Publish a boundary from coordinates you supply. Nothing is prefilled or simulated.</p>
                 </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Modal Popup on Incident Selection */}
-      {selectedIncident && !investigationMode && (
-        <IncidentDetailModal
-          incident={selectedIncident}
-          onClose={() => setSelectedIncident(null)}
-          onDispatchAction={handleDispatchAction}
-        />
-      )}
-
-      {/* Geofence Zone Creator Modal */}
-      {showGeofenceModal && (
-        <div className="fixed inset-0 z-50 bg-surface-2/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-nb border border-red-500/40 bg-surface p-6 shadow-nb relative text-ink space-y-4">
-            <button
-              onClick={() => setShowGeofenceModal(false)}
-              className="absolute top-4 right-4 text-ink-soft hover:text-white p-1 bg-surface-2 rounded-nb cursor-pointer"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <div className="flex items-center gap-3 border-b-2 border-line pb-3">
-              <div className="p-2.5 bg-red-500/20 text-danger rounded-nb border border-red-500/30">
-                <Layers className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="font-bold text-lg text-ink">Publish Government Geofence</h3>
-                <p className="text-xs text-ink-soft">Add active danger zone polygon to Supabase & On-Chain</p>
-              </div>
-            </div>
-
-            <form onSubmit={handleCreateGeofence} className="space-y-3 text-xs">
-              <div>
-                <label className="block text-ink-soft mb-1">Geofence Zone Title</label>
-                <input
-                  type="text"
-                  value={newGf.name}
-                  onChange={(e) => setNewGf({ ...newGf, name: e.target.value })}
-                  className="w-full bg-surface-2 border-2 border-line rounded-nb p-2.5 text-ink focus:outline-none focus:border-red-500"
-                />
+                <button type="button" onClick={() => setShowGeofenceForm(false)} className="minimal-button minimal-button-secondary px-3" aria-label="Close add geofence"><X size={17} /></button>
               </div>
 
-              <div>
-                <label className="block text-ink-soft mb-1">Classification Type</label>
-                <select
-                  value={newGf.type}
-                  onChange={(e) => setNewGf({ ...newGf, type: e.target.value })}
-                  className="w-full bg-surface-2 border-2 border-line rounded-nb p-2.5 text-ink"
-                >
-                  <option value="high_risk">High Risk Zone</option>
-                  <option value="restricted">Restricted Access Area</option>
-                  <option value="hazard">Hazard / Disaster Zone</option>
-                  <option value="safe_zone">Safe Zone</option>
-                </select>
+              <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                <label className="block sm:col-span-2"><span className="text-sm font-medium text-ink">Zone name</span><input required value={geofenceForm.name} onChange={(event) => setGeofenceForm((current) => ({ ...current, name: event.target.value }))} className="mt-2 w-full rounded-lg border border-slate-600 bg-slate-900/50 px-3 py-2.5 text-sm text-ink outline-none focus:border-sky-400" placeholder="e.g. Restricted area name" /></label>
+                <label className="block"><span className="text-sm font-medium text-ink">Type</span><select value={geofenceForm.type} onChange={(event) => setGeofenceForm((current) => ({ ...current, type: event.target.value }))} className="mt-2 w-full rounded-lg border border-slate-600 bg-slate-900/50 px-3 py-2.5 text-sm text-ink outline-none focus:border-sky-400"><option value="high_risk">High-risk area</option><option value="restricted">Restricted area</option><option value="hazard">Hazard</option><option value="safe_zone">Safe zone</option></select></label>
+                <label className="block"><span className="text-sm font-medium text-ink">Severity</span><select value={geofenceForm.severity} onChange={(event) => setGeofenceForm((current) => ({ ...current, severity: event.target.value }))} className="mt-2 w-full rounded-lg border border-slate-600 bg-slate-900/50 px-3 py-2.5 text-sm text-ink outline-none focus:border-sky-400"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="critical">Critical</option></select></label>
+                <label className="block sm:col-span-2"><span className="text-sm font-medium text-ink">Boundary coordinates</span><textarea required rows={6} value={geofenceForm.coordinates} onChange={(event) => setGeofenceForm((current) => ({ ...current, coordinates: event.target.value }))} className="mt-2 w-full rounded-lg border border-slate-600 bg-slate-900/50 px-3 py-2.5 font-mono text-sm text-ink outline-none focus:border-sky-400" placeholder={'latitude, longitude\nlatitude, longitude\nlatitude, longitude'} /><span className="mt-2 block text-xs leading-5 text-ink-soft">Enter at least three corner pairs, one per line. The boundary closes automatically when saved.</span></label>
+                <label className="block sm:col-span-2"><span className="text-sm font-medium text-ink">Operational note <span className="font-normal text-ink-soft">(optional)</span></span><input value={geofenceForm.description} onChange={(event) => setGeofenceForm((current) => ({ ...current, description: event.target.value }))} className="mt-2 w-full rounded-lg border border-slate-600 bg-slate-900/50 px-3 py-2.5 text-sm text-ink outline-none focus:border-sky-400" placeholder="Reason or source for this boundary" /></label>
               </div>
 
-              <div>
-                <label className="block text-ink-soft mb-1">Severity Level</label>
-                <select
-                  value={newGf.severity}
-                  onChange={(e) => setNewGf({ ...newGf, severity: e.target.value })}
-                  className="w-full bg-surface-2 border-2 border-line rounded-nb p-2.5 text-ink"
-                >
-                  <option value="critical">CRITICAL</option>
-                  <option value="high">HIGH</option>
-                  <option value="medium">MEDIUM</option>
-                </select>
-              </div>
-
-              <button
-                type="submit"
-                className="w-full py-2.5 bg-red-600 hover:bg-red-500 text-white font-bold rounded-nb transition cursor-pointer mt-2"
-              >
-                Publish Geofence to System
-              </button>
+              {geofenceError && <p className="mt-4 rounded-lg border border-rose-400/40 bg-rose-400/10 px-3 py-2.5 text-sm text-rose-100">{geofenceError}</p>}
+              <div className="mt-6 flex flex-wrap justify-end gap-3"><button type="button" onClick={() => setShowGeofenceForm(false)} className="minimal-button minimal-button-secondary">Cancel</button><button type="submit" disabled={geofenceSaving} className="minimal-button minimal-button-primary">{geofenceSaving ? 'Publishing…' : 'Publish geofence'}</button></div>
             </form>
           </div>
         </div>
       )}
-    </main>
+    </div>
+  );
+}
+
+function Metric({ label, value, icon, tone = 'text-sky-300' }: { label: string; value?: number | string; icon: React.ReactNode; tone?: string }) {
+  return (
+    <div className="minimal-card flex items-center gap-4 p-5">
+      <span className={tone}>{icon}</span>
+      <div><p className="text-sm text-ink-soft">{label}</p><p className="mt-1 text-2xl font-semibold tracking-tight text-ink">{value ?? '—'}</p></div>
+    </div>
+  );
+}
+
+function InfoCard({ label, value, detail }: { label: string; value: string; detail?: string }) {
+  return (
+    <div className="rounded-xl border border-slate-700/70 bg-slate-900/30 p-4">
+      <p className="text-xs font-medium uppercase tracking-[0.08em] text-sky-300">{label}</p>
+      <p className="mt-2 break-words text-sm font-medium text-ink">{value}</p>
+      {detail && <p className="mt-1 break-all text-xs leading-5 text-ink-soft">{detail}</p>}
+    </div>
   );
 }
