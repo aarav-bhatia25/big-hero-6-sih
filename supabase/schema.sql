@@ -102,8 +102,11 @@ create table incidents (
   "assignedResponderName"   text,
   "etaMinutes"              integer,
   timeline                  jsonb default '[]'::jsonb,
+  "emergencyContactNotifications" jsonb,
   "efirDraft"               jsonb,
   "resolvedAt"              timestamptz,
+  "cancelledAt"             timestamptz,
+  "cancelledBy"              text,
   "createdAt"               timestamptz default now()
 );
 create index incidents_created_idx on incidents ("createdAt" desc);

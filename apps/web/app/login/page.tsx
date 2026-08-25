@@ -34,6 +34,26 @@ function LoginFormContent() {
   const [touristLoading, setTouristLoading] = useState(false);
   const [touristError, setTouristError] = useState<string | null>(null);
 
+  React.useEffect(() => {
+    fetch('/api/auth/me')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.authenticated && data.user) {
+          const role = data.user.role;
+          if (redirect && redirect.startsWith('/')) {
+            router.replace(redirect as any);
+          } else if (role === 'admin' || role === 'authority') {
+            router.replace('/authority');
+          } else if (role === 'responder') {
+            router.replace('/dashboard');
+          } else {
+            router.replace('/citizen');
+          }
+        }
+      })
+      .catch(() => {});
+  }, [router, redirect]);
+
   const applyTouristPreset = async (presetId: string) => {
     setTouristIdentifier(presetId);
     setTouristLoading(true);

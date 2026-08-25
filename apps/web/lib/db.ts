@@ -193,9 +193,44 @@ export async function listIncidents(limit = 20): Promise<Row[]> {
     .limit(limit);
   if (error) {
     console.warn("[prahari] listIncidents:", error.message);
-    return [];
+    return [...inMemoryIncidents.values()]
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, limit);
   }
-  return data ?? [];
+  return (data ?? []).map((dbRow) => {
+    const mem = inMemoryIncidents.get(dbRow.incidentId);
+    return mem ? { ...mem, ...dbRow, emergencyContactNotifications: dbRow.emergencyContactNotifications ?? mem.emergencyContactNotifications } : dbRow;
+  });
+}
+
+const KNOWN_INCIDENT_DB_COLUMNS = new Set([
+  'id',
+  'incidentId',
+  'touristId',
+  'touristName',
+  'type',
+  'status',
+  'location',
+  'severity',
+  'riskScore',
+  'assignedResponder',
+  'assignedResponderUnitId',
+  'assignedResponderName',
+  'etaMinutes',
+  'timeline',
+  'efirDraft',
+  'resolvedAt',
+  'createdAt',
+]);
+
+function sanitizeIncidentRowForDb(row: Row): Row {
+  const sanitized: Row = {};
+  for (const [key, val] of Object.entries(row)) {
+    if (KNOWN_INCIDENT_DB_COLUMNS.has(key)) {
+      sanitized[key] = val;
+    }
+  }
+  return sanitized;
 }
 
 export async function insertIncident(row: Row): Promise<boolean> {
@@ -203,7 +238,16 @@ export async function insertIncident(row: Row): Promise<boolean> {
   const sb = getSupabase();
   if (!sb) return true;
   const { error } = await sb.from("incidents").insert(row);
-  if (error) { console.warn("[prahari] insertIncident:", error.message); return false; }
+  if (error) {
+    console.warn("[prahari] insertIncident:", error.message);
+    if (error.message?.includes("schema cache") || error.message?.includes("column") || error.code === 'PGRST204') {
+      const sanitized = sanitizeIncidentRowForDb(row);
+      const { error: retryErr } = await sb.from("incidents").insert(sanitized);
+      if (!retryErr) return true;
+      console.warn("[prahari] insertIncident retry:", retryErr.message);
+    }
+    return false;
+  }
   return true;
 }
 
@@ -213,7 +257,15 @@ export async function upsertIncident(row: Row): Promise<boolean> {
   const sb = getSupabase();
   if (!sb) return true;
   const { error } = await sb.from("incidents").upsert(row, { onConflict: "incidentId" });
-  if (error) { console.warn("[prahari] upsertIncident:", error.message); return false; }
+  if (error) {
+    console.warn("[prahari] upsertIncident:", error.message);
+    if (error.message?.includes("schema cache") || error.message?.includes("column") || error.code === 'PGRST204') {
+      const sanitized = sanitizeIncidentRowForDb(row);
+      const { error: retryErr } = await sb.from("incidents").upsert(sanitized, { onConflict: "incidentId" });
+      if (!retryErr) return true;
+    }
+    return false;
+  }
   return true;
 }
 
@@ -283,19 +335,35 @@ export async function getDashboardStats(): Promise<DashboardStats | null> {
 
 /** Partial update of an incident by its business key. */
 export async function updateIncident(incidentId: string, fields: Row): Promise<Row | null> {
-  const existing = inMemoryIncidents.get(incidentId);
-  if (existing) {
-    inMemoryIncidents.set(incidentId, { ...existing, ...fields, updatedAt: new Date().toISOString() });
+  let existing = inMemoryIncidents.get(incidentId);
+  if (!existing) {
+    existing = { incidentId, ...fields };
+  } else {
+    existing = { ...existing, ...fields };
   }
+  const updatedInMemory = { ...existing, updatedAt: new Date().toISOString() };
+  inMemoryIncidents.set(incidentId, updatedInMemory);
+
   const sb = getSupabase();
-  if (!sb) return inMemoryIncidents.get(incidentId) ?? null;
+  if (!sb) return updatedInMemory;
+
   const { data, error } = await sb
     .from("incidents").update(fields).eq("incidentId", incidentId).select().maybeSingle();
+
   if (error) {
     console.warn("[prahari] updateIncident:", error.message);
-    return null;
+    if (error.message?.includes("schema cache") || error.message?.includes("column") || error.code === 'PGRST204') {
+      const sanitized = sanitizeIncidentRowForDb(fields);
+      if (Object.keys(sanitized).length > 0) {
+        const { data: retryData, error: retryErr } = await sb
+          .from("incidents").update(sanitized).eq("incidentId", incidentId).select().maybeSingle();
+        if (!retryErr) return { ...updatedInMemory, ...(retryData || {}) };
+        console.warn("[prahari] updateIncident retry failed:", retryErr.message);
+      }
+    }
+    return updatedInMemory;
   }
-  return data ?? null;
+  return data ? { ...updatedInMemory, ...data } : updatedInMemory;
 }
 
 // ------------------------------------------------------------- kyc sessions

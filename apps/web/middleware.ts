@@ -35,14 +35,35 @@ export async function middleware(request: NextRequest) {
   const cookie = request.cookies.get(SESSION_COOKIE_NAME)?.value;
   const session = cookie ? await verifySessionToken(cookie) : null;
 
-  // 3. Handle /login page: if already logged in, redirect to appropriate home
-  if (pathname === '/login') {
+  // 3. Handle /login & /signin routes: if already logged in, redirect to appropriate home
+  const normalizedPath = pathname.length > 1 && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname;
+  if (normalizedPath === '/login' || normalizedPath === '/signin' || normalizedPath === '/sign-in') {
     if (session) {
+      const redirectTarget = request.nextUrl.searchParams.get('redirect');
+      if (redirectTarget && redirectTarget.startsWith('/')) {
+        const targetPrefix = Object.keys(ROLE_ROUTE_MAP).find(
+          (prefix) => redirectTarget === prefix || redirectTarget.startsWith(`${prefix}/`)
+        );
+        if (targetPrefix && ROLE_ROUTE_MAP[targetPrefix]?.includes(session.role)) {
+          return NextResponse.redirect(new URL(redirectTarget, request.url));
+        }
+      }
+
       if (session.role === 'admin' || session.role === 'authority') {
         return NextResponse.redirect(new URL('/authority', request.url));
       }
+      if (session.role === 'responder') {
+        return NextResponse.redirect(new URL('/dashboard', request.url));
+      }
       return NextResponse.redirect(new URL('/citizen', request.url));
     }
+
+    if (normalizedPath === '/signin' || normalizedPath === '/sign-in') {
+      const loginUrl = new URL('/login', request.url);
+      loginUrl.search = request.nextUrl.search;
+      return NextResponse.redirect(loginUrl);
+    }
+
     return NextResponse.next();
   }
 
