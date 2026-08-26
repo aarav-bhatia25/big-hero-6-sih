@@ -41,29 +41,10 @@ export default function OfflineEmergencyChat({
 
   // Load stored messages & setup mesh broadcast channel
   useEffect(() => {
-    const syncChat = async () => {
+    void (async () => {
       const stored = await getChatMessagesForIncident(incidentId);
-      try {
-        const res = await fetch(`/api/chat-relay?incidentId=${encodeURIComponent(incidentId)}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.success && Array.isArray(data.messages)) {
-            for (const msg of data.messages) {
-              await saveChatMessage(msg);
-            }
-            const combinedMap = new Map<string, SOSPacket>();
-            for (const m of stored) combinedMap.set(m.packetId, m);
-            for (const m of data.messages) combinedMap.set(m.packetId, m);
-            const sorted = Array.from(combinedMap.values()).sort((a, b) => a.timestamp - b.timestamp);
-            setMessages(sorted);
-            return;
-          }
-        }
-      } catch {}
       setMessages(stored);
-    };
-
-    void syncChat();
+    })();
 
     if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
       try {
@@ -86,18 +67,41 @@ export default function OfflineEmergencyChat({
       }
     }
 
-    // Polling timer disabled for manual Bluetooth hardware testing
-    // const syncInterval = window.setInterval(syncChat, 2000);
+    // Server Sync Poller
+    const syncInterval = window.setInterval(async () => {
+      try {
+        const res = await fetch(`/api/chat-relay?incidentId=${encodeURIComponent(incidentId)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && Array.isArray(data.messages)) {
+            for (const msg of data.messages) {
+              void saveChatMessage(msg);
+            }
+            setMessages((prev) => {
+              const combinedMap = new Map<string, SOSPacket>();
+              for (const m of prev) combinedMap.set(m.packetId, m);
+              for (const m of data.messages) combinedMap.set(m.packetId, m);
+              return Array.from(combinedMap.values()).sort((a, b) => a.timestamp - b.timestamp);
+            });
+          }
+        }
+      } catch {
+        // Offline poller error ignored
+      }
+    }, 4000);
 
     return () => {
-      // window.clearInterval(syncInterval);
+      window.clearInterval(syncInterval);
       if (broadcastChannelRef.current) {
         broadcastChannelRef.current.close();
       }
     };
   }, [incidentId]);
 
-
+  // Scroll to bottom
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -118,15 +122,13 @@ export default function OfflineEmergencyChat({
     setMessages((prev) => [...prev, packet]);
     setText('');
 
-    // 2. Broadcast over local P2P Mesh (Disabled for direct Web Bluetooth testing)
-    /*
+    // 2. Broadcast over local P2P Mesh
     if (broadcastChannelRef.current) {
       broadcastChannelRef.current.postMessage({
         type: 'EMERGENCY_CHAT_MESSAGE',
         packet,
       });
     }
-    */
 
     // 3. Post to Gateway API endpoint
     try {

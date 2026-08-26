@@ -112,8 +112,7 @@ export class BLERelayEngine {
       }
     }
 
-    // 5. Forward to next hop over BroadcastChannel / BLE Mesh (Disabled for manual Bluetooth hardware testing)
-    /*
+    // 5. Forward to next hop over BroadcastChannel / BLE Mesh
     if (typeof BroadcastChannel !== 'undefined') {
       try {
         const bc = new BroadcastChannel('prahari_sos_mesh');
@@ -128,7 +127,6 @@ export class BLERelayEngine {
         console.warn('[BLERelayEngine] BroadcastChannel post failed:', err);
       }
     }
-    */
 
     this.emit({
       type: 'PACKET_FORWARDED',

@@ -51,8 +51,7 @@ export class BleTransport implements SOSTransport {
       // Persist local record as RELAYED
       await saveQueuedPacket(relayedPacket, 'RELAYED');
 
-      // BroadcastChannel memory fallback disabled for direct Bluetooth hardware testing
-      /*
+      // Broadcast over Mesh Channel to nearby peers
       if (this.broadcastChannel) {
         this.broadcastChannel.postMessage({
           type: 'EMERGENCY_SOS_RELAY',
@@ -60,24 +59,6 @@ export class BleTransport implements SOSTransport {
           senderDeviceId: currentDeviceId,
           timestamp: Date.now(),
         });
-      }
-      */
-
-      // Real Web Bluetooth Hardware Pairing Scan Attempt
-      if (typeof navigator !== 'undefined' && (navigator as any) && 'bluetooth' in (navigator as any)) {
-        try {
-          console.log('[BleTransport] Invoking real Web Bluetooth API requestDevice hardware scan...');
-          const bluetooth = (navigator as any).bluetooth;
-          if (typeof bluetooth.requestDevice === 'function') {
-            const device = await bluetooth.requestDevice({
-              acceptAllDevices: true,
-              optionalServices: ['battery_service'],
-            });
-            console.log('[BleTransport] Web Bluetooth device paired:', device.name || device.id);
-          }
-        } catch (bleErr: any) {
-          console.warn('[BleTransport] Web Bluetooth hardware scan result:', bleErr.message);
-        }
       }
 
       // Also invoke global simulator if present (evaluator mode)

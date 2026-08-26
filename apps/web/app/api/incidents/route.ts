@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { insertIncident, listIncidents, updateIncident, deleteIncident, getIncident, listResponders, getTourist } from "@/lib/db";
+import { insertIncident, listIncidents, updateIncident, deleteIncident, listResponders, getTourist } from "@/lib/db";
 import { findNearestResponder } from "@/lib/services/dispatchEngine";
 import { emitToGateway } from "@/lib/services/gatewayEmit";
 import { canAccessTouristData, requireAuth } from "@/lib/auth/guards";
@@ -149,26 +149,15 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ success: false, error: "incidentId is required" }, { status: 400 });
     }
 
-    let existing = await getIncident(incidentId);
+    const existing = (await listIncidents(200)).find((incident: any) => incident.incidentId === incidentId);
     if (!existing) {
-      existing = {
-        incidentId,
-        touristId: session.touristId || 'TOUR-7890',
-        touristName: session.name || 'Traveller',
-        type: 'PANIC',
-        status: 'ACTIVE',
-        location: { lat: 19.0728, lng: 72.8997 },
-        severity: 'CRITICAL',
-        createdAt: new Date().toISOString(),
-      };
-      await insertIncident(existing);
+      return NextResponse.json({ success: false, error: 'Incident not found.' }, { status: 404 });
     }
-
     if (isFixtureIncident(existing)) {
       return NextResponse.json({ success: false, error: 'Fixture incidents cannot be changed through the operational workflow.' }, { status: 400 });
     }
     if (session.role === 'tourist') {
-      if (status !== 'CANCELLED') {
+      if (status !== 'CANCELLED' || !canAccessTouristData(session, existing.touristId)) {
         return NextResponse.json({ success: false, error: 'Tourists may only cancel their own alert.' }, { status: 403 });
       }
     }

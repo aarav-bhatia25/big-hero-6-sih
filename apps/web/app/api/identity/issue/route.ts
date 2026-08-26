@@ -31,14 +31,14 @@ export async function POST(request: NextRequest) {
     const subject = verification.subject;
     const normalizedEmergencyContacts = Array.isArray(emergencyContacts)
       ? emergencyContacts
-          .slice(0, 5)
-          .map((contact: any) => ({
-            name: String(contact?.name ?? 'Emergency contact').trim().slice(0, 120) || 'Emergency contact',
-            relationship: String(contact?.relationship ?? 'Emergency contact').trim().slice(0, 80) || 'Emergency contact',
-            phone: String(contact?.phone ?? '').trim().slice(0, 40) || undefined,
-            email: String(contact?.email ?? '').trim().toLowerCase().slice(0, 254) || undefined,
-          }))
-          .filter((contact: any) => contact.phone || contact.email)
+        .slice(0, 5)
+        .map((contact: any) => ({
+          name: String(contact?.name ?? 'Emergency contact').trim().slice(0, 120) || 'Emergency contact',
+          relationship: String(contact?.relationship ?? 'Emergency contact').trim().slice(0, 80) || 'Emergency contact',
+          phone: String(contact?.phone ?? '').trim().slice(0, 40) || undefined,
+          email: String(contact?.email ?? '').trim().toLowerCase().slice(0, 254) || undefined,
+        }))
+        .filter((contact: any) => contact.phone || contact.email)
       : [];
     if (normalizedEmergencyContacts.some((contact: any) => contact.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact.email))) {
       return NextResponse.json({ ok: false, error: 'Each emergency-contact email must be valid.' }, { status: 400 });
@@ -54,14 +54,16 @@ export async function POST(request: NextRequest) {
     }
     const normalizedItinerary = itinerary && typeof itinerary === 'object'
       ? {
-          ...(requestedVisitEnd ? { visitEndsAt: requestedVisitEnd.toISOString() } : {}),
-          ...(typeof itinerary.summary === 'string' ? { summary: itinerary.summary.trim().slice(0, 1_000) } : {}),
-          ...(Array.isArray(itinerary.route)
-            ? { route: itinerary.route.slice(0, 100).filter((point: any) =>
-                Number.isFinite(point?.lat) && Number.isFinite(point?.lng)
-              ).map((point: any) => ({ lat: Number(point.lat), lng: Number(point.lng) })) }
-            : {}),
-        }
+        ...(requestedVisitEnd ? { visitEndsAt: requestedVisitEnd.toISOString() } : {}),
+        ...(typeof itinerary.summary === 'string' ? { summary: itinerary.summary.trim().slice(0, 1_000) } : {}),
+        ...(Array.isArray(itinerary.route)
+          ? {
+            route: itinerary.route.slice(0, 100).filter((point: any) =>
+              Number.isFinite(point?.lat) && Number.isFinite(point?.lng)
+            ).map((point: any) => ({ lat: Number(point.lat), lng: Number(point.lng) }))
+          }
+          : {}),
+      }
       : requestedVisitEnd
         ? { visitEndsAt: requestedVisitEnd.toISOString() }
         : undefined;
@@ -162,4 +164,10 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }
+}
+
+return response;
+  } catch (error: any) {
+  return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+}
 }

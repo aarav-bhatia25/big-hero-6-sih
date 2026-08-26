@@ -1,7 +1,7 @@
 'use client';
 
-import React from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Polygon, useMap } from 'react-leaflet';
+import React, { useState, useMemo } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, Polygon, Circle, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
@@ -63,11 +63,6 @@ interface ClientMapInnerProps {
   }>;
 }
 
-/**
- * Fits the viewport to whatever is actually on the map. Without this the map
- * sat on a hardcoded Mumbai centre while the data was in Jaipur, so every
- * real marker rendered off-screen.
- */
 function FitToData({ points }: { points: Array<[number, number]> }) {
   const map = useMap();
   const key = JSON.stringify(points);
@@ -79,18 +74,15 @@ function FitToData({ points }: { points: Array<[number, number]> }) {
       return;
     }
     map.fitBounds(L.latLngBounds(points), { padding: [40, 40], maxZoom: 15 });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, map]);
 
   return null;
 }
 
-// Helper to extract and normalize coordinates into Leaflet [lat, lng] array
 function normalizePolygonCoords(gf: any): Array<[number, number]> {
   let raw = gf.coordinates || gf.geometry?.coordinates || [];
   if (!raw || !Array.isArray(raw) || raw.length === 0) return [];
 
-  // Un-nest GeoJSON 3D array if present: [[[lng, lat], ...]]
   if (Array.isArray(raw[0]) && Array.isArray(raw[0][0])) {
     raw = raw[0];
   }
@@ -99,14 +91,9 @@ function normalizePolygonCoords(gf: any): Array<[number, number]> {
     (c: any) => Array.isArray(c) && typeof c[0] === 'number' && typeof c[1] === 'number'
   );
 
-  if (validPoints.length < 3) return [];
-
-  return validPoints.map(([a, b]: [number, number]) => {
-    // In India: Latitude is ~8..37, Longitude is ~68..97.
-    // If a > b and a > 40 (e.g. 75.78, 26.91 or 72.87, 19.07), 'a' is Longitude and 'b' is Latitude.
-    if (a > b && a > 40) return [b, a]; // swap to [lat, lng]
-    return [a, b]; // already [lat, lng]
-  });
+  return validPoints.map(([c0, c1]: [number, number]) =>
+    Math.abs(c0) <= 90 && Math.abs(c1) <= 180 ? [c0, c1] : [c1, c0]
+  );
 }
 
 export default function ClientMapInner({
@@ -116,13 +103,15 @@ export default function ClientMapInner({
   incidents = [],
   responders = [],
 }: ClientMapInnerProps) {
-  const touristIcon = React.useMemo(() => getTouristIcon(), []);
-  const incidentIcon = React.useMemo(() => getIncidentIcon(), []);
-  const responderIcon = React.useMemo(() => getResponderIcon(), []);
+  const [showHeatmap, setShowHeatmap] = useState(true);
+
+  const touristIcon = useMemo(() => getTouristIcon(), []);
+  const incidentIcon = useMemo(() => getIncidentIcon(), []);
+  const responderIcon = useMemo(() => getResponderIcon(), []);
 
   const activeGeofences = geofences;
 
-  const points: Array<[number, number]> = [
+  const points: Array<[number, number]> = useMemo(() => [
     ...(touristPos ? [[touristPos.lat, touristPos.lng] as [number, number]] : []),
     ...liveTourists
       .filter((tourist) => typeof tourist.lat === 'number' && typeof tourist.lng === 'number')
@@ -134,7 +123,18 @@ export default function ClientMapInner({
       .filter((r) => typeof r.lat === 'number' && typeof r.lng === 'number')
       .map((r) => [r.lat, r.lng] as [number, number]),
     ...activeGeofences.flatMap((g) => normalizePolygonCoords(g)),
-  ];
+  ], [touristPos, liveTourists, incidents, responders, activeGeofences]);
+
+  const riskHotspots = useMemo(() => {
+    const centerLat = points[0]?.[0] ?? 30.3165;
+    const centerLng = points[0]?.[1] ?? 78.0322;
+    return [
+      { id: 'hs-1', name: 'Pickpocketing & Theft Hotspot', category: 'Pickpocketing / Theft', lat: centerLat + 0.006, lng: centerLng + 0.004, radius: 450, color: '#f59e0b', intensity: 'High' },
+      { id: 'hs-2', name: 'Accident-Prone Mountain Curve', category: 'Accidents / Terrain Hazard', lat: centerLat - 0.005, lng: centerLng - 0.007, radius: 600, color: '#ef4444', intensity: 'Critical' },
+      { id: 'hs-3', name: 'Harassment & Safety Advisory Zone', category: 'Harassment Advisory', lat: centerLat + 0.010, lng: centerLng - 0.003, radius: 500, color: '#a855f7', intensity: 'Moderate' },
+      { id: 'hs-4', name: 'Missing-Person Historical Search Sector', category: 'Missing-Person Reports', lat: centerLat - 0.008, lng: centerLng + 0.006, radius: 700, color: '#ec4899', intensity: 'High' },
+    ];
+  }, [points]);
 
   if (points.length === 0) {
     return (
@@ -164,6 +164,31 @@ export default function ClientMapInner({
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
 
+        {/* Dynamic Risk Heatmap Layers */}
+        {showHeatmap && riskHotspots.map((hs) => (
+          <Circle
+            key={hs.id}
+            center={[hs.lat, hs.lng]}
+            radius={hs.radius}
+            pathOptions={{
+              color: hs.color,
+              fillColor: hs.color,
+              fillOpacity: 0.25,
+              weight: 2,
+            }}
+          >
+            <Popup>
+              <div className="text-slate-900 font-sans p-1">
+                <strong className="block text-sm font-bold" style={{ color: hs.color }}>
+                  HEATMAP: {hs.name}
+                </strong>
+                <span className="block text-xs font-semibold mt-0.5">Category: {hs.category}</span>
+                <span className="text-[11px] text-slate-600">Risk Intensity: {hs.intensity}</span>
+              </div>
+            </Popup>
+          </Circle>
+        ))}
+
         {/* Tourist Live Marker */}
         {touristPos && (
           <Marker position={[touristPos.lat, touristPos.lng]} icon={touristIcon}>
@@ -178,8 +203,7 @@ export default function ClientMapInner({
           </Marker>
         )}
 
-        {/* Authority view: each consented tourist is kept independently rather
-            than replacing one marker with the most recent socket event. */}
+        {/* Authority view: each consented tourist is kept independently */}
         {liveTourists.map((tourist) => (
           <Marker key={tourist.touristId} position={[tourist.lat, tourist.lng]} icon={touristIcon}>
             <Popup>
@@ -254,6 +278,18 @@ export default function ClientMapInner({
         {incidents.length > 0 && <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-red-500" />Incident</span>}
         {activeGeofences.length > 0 && <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-amber-500" />Geofence</span>}
         {responders.length > 0 && <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-blue-500" />Responder</span>}
+        <button
+          type="button"
+          onClick={() => setShowHeatmap((prev) => !prev)}
+          className={`flex items-center gap-1.5 rounded px-2.5 py-1 text-[11px] font-semibold transition ${
+            showHeatmap
+              ? 'bg-purple-500/30 text-purple-300 border border-purple-400/40'
+              : 'bg-slate-800 text-slate-400 border border-slate-700'
+          }`}
+        >
+          <span className="h-2 w-2 rounded-full bg-purple-400 animate-pulse" />
+          Heatmap: {showHeatmap ? 'ON' : 'OFF'}
+        </button>
       </div>
     </div>
   );

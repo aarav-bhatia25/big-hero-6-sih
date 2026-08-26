@@ -104,3 +104,14 @@ export async function verifyOnChain(credentialHash: string): Promise<OnChainStat
     return null;
   }
 }
+exists: Number(stateNum) !== 0,
+  isValid: Boolean(isValid),
+    state: CREDENTIAL_STATE[Number(stateNum)] ?? "Unknown",
+      expiresAt: Number(expiresAt),
+        chainId: Number(net.chainId),
+    };
+  } catch (err: any) {
+  console.warn("[prahari] verifyOnChain:", err?.message ?? err);
+  return null;
+}
+}
