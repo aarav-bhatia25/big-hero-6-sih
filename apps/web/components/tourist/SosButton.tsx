@@ -22,20 +22,6 @@ export default function SosButton({
   const [cancelled, setCancelled] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Restore active SOS on mount (survives page reloads)
-  React.useEffect(() => {
-    try {
-      const saved = localStorage.getItem('prahari_active_sos');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed && parsed.incidentId && parsed.status !== 'CANCELLED' && parsed.status !== 'RESOLVED') {
-          setActiveSos(parsed);
-          onSosTriggered?.(parsed);
-        }
-      }
-    } catch {}
-  }, []);
-
   const canDispatch = true;
 
   const handleSosClick = async () => {
@@ -86,7 +72,6 @@ export default function SosButton({
 
       // Import mesh packet & transport manager dynamically
       const { createSOSPacket } = await import('@/lib/sos-mesh/sosPacket');
-      const { globalTransportManager } = await import('@/lib/sos-mesh/transports/transportManager');
 
       const packet = createSOSPacket({
         touristId: effectiveTouristId,
@@ -116,9 +101,6 @@ export default function SosButton({
       };
 
       setActiveSos(activeRecord);
-      try {
-        localStorage.setItem('prahari_active_sos', JSON.stringify(activeRecord));
-      } catch {}
       onSosTriggered?.(activeRecord);
     } catch (err: any) {
       console.error('Error triggering SOS:', err);
@@ -141,9 +123,6 @@ export default function SosButton({
       const data = await res.json();
       if (!data.success) throw new Error(data.error || 'Could not cancel the alert.');
       setActiveSos(null);
-      try {
-        localStorage.removeItem('prahari_active_sos');
-      } catch {}
       setCancelled(true);
       onSosCancelled?.();
     } catch (error: any) {
@@ -158,35 +137,7 @@ export default function SosButton({
           <h2 className="flex items-center gap-2 text-xl font-semibold tracking-tight text-ink"><Siren className="size-5 text-red-400" /> Emergency assistance</h2>
           <p className="mt-1 text-sm text-ink-soft">Send an SOS using your current shared location or offline mesh channel.</p>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={async () => {
-              if (typeof navigator === 'undefined' || !('bluetooth' in (navigator as any))) {
-                window.alert("Web Bluetooth API is not supported by your browser or operating system.");
-                return;
-              }
-              try {
-                const bluetooth = (navigator as any).bluetooth;
-                const device = await bluetooth.requestDevice({
-                  acceptAllDevices: true,
-                  optionalServices: ['battery_service'],
-                });
-                window.alert(`Bluetooth Scan Success! Paired with: ${device.name || device.id}`);
-              } catch (err: any) {
-                if (err.name === 'NotFoundError') {
-                  window.alert("Bluetooth hardware scan dialog was closed.");
-                } else {
-                  window.alert(`Bluetooth Hardware Response: ${err.message}`);
-                }
-              }
-            }}
-            className="rounded-full border border-sky-500/30 bg-sky-500/10 px-3 py-1 text-xs font-semibold text-sky-300 hover:bg-sky-500/20"
-          >
-            Scan Bluetooth
-          </button>
-          <span className="rounded-full border border-line px-3 py-1 text-xs font-medium text-ink-soft">Connectivity-Agnostic SOS</span>
-        </div>
+        <span className="rounded-full border border-line px-3 py-1 text-xs font-medium text-ink-soft">Connectivity-Agnostic SOS</span>
       </div>
 
       <p className="mb-5 max-w-2xl text-sm leading-6 text-ink-soft">

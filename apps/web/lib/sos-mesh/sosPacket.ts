@@ -78,9 +78,9 @@ export function createSOSPacket(params: {
  */
 export function createChatPacket(params: {
   incidentId: string;
-  touristId?: string;
+  touristId: string;
   senderRole: 'tourist' | 'authority';
-  senderName?: string;
+  senderName: string;
   text: string;
   latitude?: number;
   longitude?: number;
@@ -89,18 +89,16 @@ export function createChatPacket(params: {
   const now = Date.now();
   const packetId = `CHAT-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
   const originDeviceId = params.originDeviceId ?? getOrCreateDeviceId();
-  const effectiveTouristId = params.touristId || 'DTI-IND-000123';
-  const effectiveSenderName = params.senderName || (params.senderRole === 'tourist' ? 'Traveller' : 'Police HQ');
 
   return {
     version: CURRENT_PACKET_VERSION,
     packetId,
     incidentId: params.incidentId,
-    touristId: effectiveTouristId,
+    touristId: params.touristId,
     type: 'PANIC',
     severity: 'HIGH',
-    latitude: typeof params.latitude === 'number' && Number.isFinite(params.latitude) ? params.latitude : 19.0728,
-    longitude: typeof params.longitude === 'number' && Number.isFinite(params.longitude) ? params.longitude : 72.8997,
+    latitude: params.latitude ?? 19.0728,
+    longitude: params.longitude ?? 72.8997,
     accuracy: 10,
     timestamp: now,
     expiresAt: now + DEFAULT_PACKET_LIFESPAN_MS,
@@ -112,7 +110,7 @@ export function createChatPacket(params: {
     packetCategory: 'CHAT_MESSAGE',
     chatText: params.text,
     senderRole: params.senderRole,
-    senderName: effectiveSenderName,
+    senderName: params.senderName,
   };
 }
 

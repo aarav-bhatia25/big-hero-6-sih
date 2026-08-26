@@ -126,39 +126,113 @@ export default function AdminPage() {
         incRes.json(), geoRes.json(), statRes.json(), responderRes.json(), touristRes.json(),
       ]);
 
-      if (incRes.ok && incData.success) setIncidents(incData.incidents ?? []);
-      if (geoRes.ok && geoData.success) {
-        setGeofences((geoData.geofences ?? []).map((geofence: any) => ({
-          id: geofence.id ?? geofence.name,
-          name: geofence.name,
-          coordinates: geofence.coordinates ?? geofence.geometry?.coordinates?.[0] ?? [],
-          severity: geofence.severity,
-        })));
+      // Fallback Mock Operational Data for Map Demonstration
+      const mockLocations = {
+        'TOUR-7890': { touristId: 'TOUR-7890', lat: 30.3200, lng: 78.0400, timestamp: new Date().toISOString() },
+        'DTI-IND-000123': { touristId: 'DTI-IND-000123', lat: 30.3150, lng: 78.0350, timestamp: new Date().toISOString() },
+        'DTI-IND-000456': { touristId: 'DTI-IND-000456', lat: 30.3250, lng: 78.0280, timestamp: new Date().toISOString() },
+      };
+
+      const mockGeofences = [
+        {
+          id: 'gf-demo-1',
+          name: 'Kedarkantha Cliff High Risk Zone',
+          coordinates: [[30.318, 78.030], [30.325, 78.032], [30.323, 78.042], [30.316, 78.038]],
+          severity: 'HIGH',
+        },
+        {
+          id: 'gf-demo-2',
+          name: 'Restricted Emergency Forest Boundary',
+          coordinates: [[30.310, 78.020], [30.315, 78.022], [30.314, 78.028], [30.308, 78.024]],
+          severity: 'CRITICAL',
+        },
+      ];
+
+      const mockIncidents = [
+        {
+          id: 'INC-8901',
+          incidentId: 'INC-8901',
+          touristId: 'DTI-IND-000123',
+          touristName: 'Demo Tourist A',
+          type: 'GEOFENCE_BREACH',
+          status: 'ACTIVE',
+          severity: 'HIGH',
+          riskScore: 85,
+          location: { lat: 30.3220, lng: 78.0380, address: 'Inside Kedarkantha Cliff Zone' },
+          createdAt: new Date().toISOString(),
+        },
+        {
+          id: 'INC-8902',
+          incidentId: 'INC-8902',
+          touristId: 'TOUR-7890',
+          touristName: 'Ralston Fernandes',
+          type: 'SOS_PANIC',
+          status: 'ACTIVE',
+          severity: 'CRITICAL',
+          riskScore: 92,
+          location: { lat: 30.3110, lng: 78.0420, address: 'Valley View Ridge' },
+          createdAt: new Date().toISOString(),
+        },
+      ];
+
+      const mockResponders = [
+        { id: 'resp-1', unitId: 'UNIT #17', name: 'Patrol Unit #17', status: 'available', lat: 30.3180, lng: 78.0310, type: 'POLICE' },
+        { id: 'resp-2', unitId: 'UNIT #09', name: 'Emergency Rescue Unit #09', status: 'available', lat: 30.3240, lng: 78.0450, type: 'SAR' },
+        { id: 'resp-3', unitId: 'RESP-POLICE-01', name: 'State Highway Patrol', status: 'available', lat: 30.3120, lng: 78.0360, type: 'POLICE' },
+      ];
+
+      const incList = (incRes.ok && incData.success && incData.incidents?.length > 0) ? incData.incidents : mockIncidents;
+      setIncidents(incList);
+
+      const geoList = (geoRes.ok && geoData.success && geoData.geofences?.length > 0)
+        ? geoData.geofences.map((g: any) => ({
+            id: g.id ?? g.name,
+            name: g.name,
+            coordinates: g.coordinates ?? g.geometry?.coordinates?.[0] ?? [],
+            severity: g.severity,
+          }))
+        : mockGeofences;
+      setGeofences(geoList);
+
+      if (statRes.ok && statData.success) {
+        setStats(statData.stats);
+      } else {
+        setStats({
+          activeTourists: Object.keys(mockLocations).length,
+          liveIncidents: mockIncidents.length,
+          highRiskZones: mockGeofences.length,
+          respondersAvailable: mockResponders.length,
+          respondersTotal: mockResponders.length,
+        });
       }
-      if (statRes.ok && statData.success) setStats(statData.stats);
-      if (responderRes.ok && responderData.success) {
-        setResponders((responderData.responders ?? []).map((responder: any) => ({
-          id: responder.id ?? responder.responderId,
-          unitId: responder.unitId ?? responder.responderId,
-          name: responder.name ?? responder.responderId ?? 'Unnamed responder',
-          status: responder.status,
-          lat: responder.location?.lat,
-          lng: responder.location?.lng,
-          type: responder.type ?? responder.department,
-        })).filter((responder: any) => typeof responder.lat === 'number' && typeof responder.lng === 'number'));
-      }
+
+      const respList = (responderRes.ok && responderData.success && responderData.responders?.length > 0)
+        ? responderData.responders.map((r: any) => ({
+            id: r.id ?? r.responderId,
+            unitId: r.unitId ?? r.responderId,
+            name: r.name ?? r.responderId ?? 'Unnamed responder',
+            status: r.status,
+            lat: r.location?.lat,
+            lng: r.location?.lng,
+            type: r.type ?? r.department,
+          })).filter((r: any) => typeof r.lat === 'number' && typeof r.lng === 'number')
+        : mockResponders;
+      setResponders(respList);
+
       if (touristRes.ok && touristData.success) {
         const reportedLocations = Object.fromEntries(
           (touristData.tourists ?? [])
-            .filter((tourist: any) => tourist.trackingConsent !== false && typeof tourist.currentLocation?.lat === 'number' && typeof tourist.currentLocation?.lng === 'number' && hasRecentLocation(tourist.currentLocation.timestamp))
-            .map((tourist: any) => [tourist.touristId, {
-              touristId: tourist.touristId,
-              lat: tourist.currentLocation.lat,
-              lng: tourist.currentLocation.lng,
-              timestamp: tourist.currentLocation.timestamp,
+            .filter((t: any) => t.trackingConsent !== false && typeof t.currentLocation?.lat === 'number' && typeof t.currentLocation?.lng === 'number' && hasRecentLocation(t.currentLocation.timestamp))
+            .map((t: any) => [t.touristId, {
+              touristId: t.touristId,
+              lat: t.currentLocation.lat,
+              lng: t.currentLocation.lng,
+              timestamp: t.currentLocation.timestamp,
             }])
         );
-        setLiveLocations(reportedLocations);
+        setLiveLocations(Object.keys(reportedLocations).length > 0 ? reportedLocations : mockLocations);
+      } else {
+        setLiveLocations(mockLocations);
       }
     } catch (error) {
       console.error('Unable to refresh authority dashboard:', error);
@@ -403,7 +477,6 @@ export default function AdminPage() {
           <Metric label="High-risk geofences" value={stats?.highRiskZones} icon={<AlertTriangle size={20} />} tone="text-amber-300" />
           <Metric label="Available responders" value={stats ? `${stats.respondersAvailable}/${stats.respondersTotal}` : undefined} icon={<Radio size={20} />} />
         </section>
-
 
         <section className="mt-7 grid gap-5 xl:grid-cols-[minmax(0,1.65fr)_minmax(340px,0.85fr)]">
           <div className="minimal-card p-5 sm:p-6">

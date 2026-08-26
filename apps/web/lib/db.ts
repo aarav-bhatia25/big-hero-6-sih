@@ -220,32 +220,6 @@ export async function listIncidents(limit = 50): Promise<Row[]> {
     .slice(0, limit);
 }
 
-export async function getIncident(incidentId: string): Promise<Row | null> {
-  const mem = inMemoryIncidents.get(incidentId);
-  if (mem) return mem;
-
-  const normalized = String(incidentId).trim().toUpperCase();
-  for (const [key, val] of inMemoryIncidents.entries()) {
-    if (String(key).trim().toUpperCase() === normalized) return val;
-  }
-
-  const sb = getSupabase();
-  if (!sb) return null;
-
-  const { data, error } = await sb
-    .from("incidents")
-    .select("*")
-    .eq("incidentId", incidentId)
-    .maybeSingle();
-
-  if (error) {
-    console.warn("[prahari] getIncident error:", error.message);
-    return null;
-  }
-
-  return data ?? null;
-}
-
 const KNOWN_INCIDENT_DB_COLUMNS = new Set([
   'id',
   'incidentId',

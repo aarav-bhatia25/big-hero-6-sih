@@ -24,12 +24,7 @@ export default function AuthorityEmergencyChat({ incidentId, touristName = 'Trav
         if (res.ok) {
           const data = await res.json();
           if (data.success && Array.isArray(data.messages)) {
-            setMessages((prev) => {
-              const map = new Map<string, SOSPacket>();
-              for (const m of prev) map.set(m.packetId, m);
-              for (const m of data.messages) map.set(m.packetId, m);
-              return Array.from(map.values()).sort((a, b) => a.timestamp - b.timestamp);
-            });
+            setMessages(data.messages);
           }
         }
       } catch (e) {
@@ -38,8 +33,7 @@ export default function AuthorityEmergencyChat({ incidentId, touristName = 'Trav
     };
 
     void fetchTranscript();
-    // Polling timer disabled for manual Bluetooth hardware testing
-    // const interval = window.setInterval(fetchTranscript, 3000);
+    const interval = window.setInterval(fetchTranscript, 3000);
 
     if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
       try {
@@ -62,14 +56,16 @@ export default function AuthorityEmergencyChat({ incidentId, touristName = 'Trav
     }
 
     return () => {
-      // window.clearInterval(interval);
+      window.clearInterval(interval);
       if (broadcastChannelRef.current) {
         broadcastChannelRef.current.close();
       }
     };
   }, [incidentId]);
 
-
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
   const handleSendResponse = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -96,15 +92,13 @@ export default function AuthorityEmergencyChat({ incidentId, touristName = 'Trav
         setMessages((prev) => [...prev, packet]);
         setText('');
 
-        // 2. Broadcast over local mesh (Disabled for direct Web Bluetooth testing)
-        /*
+        // 2. Broadcast over local mesh
         if (broadcastChannelRef.current) {
           broadcastChannelRef.current.postMessage({
             type: 'EMERGENCY_CHAT_MESSAGE',
             packet,
           });
         }
-        */
       }
     } catch (err: any) {
       window.alert(err.message || 'Failed to dispatch chat response.');

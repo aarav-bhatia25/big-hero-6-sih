@@ -87,6 +87,7 @@ export default function CitizenPage() {
   const [liveSafetyRisk, setLiveSafetyRisk] = useState<LiveSafetyRisk | null>(null);
 
 
+  // Geofence & Risk State
   const [geofences, setGeofences] = useState<any[]>([]);
 
   // The credentialed tourist this session belongs to. Loaded from the API so
@@ -532,7 +533,7 @@ export default function CitizenPage() {
               {riskMessage}
             </p>
             <p className="mt-2 text-xs text-ink-soft">
-              {liveSafetyRisk ? 'Server-side explainable safety signals' : 'Telemetry active'}
+              {liveSafetyRisk ? 'Server-side explainable safety signals' : 'No assessment before telemetry'}
             </p>
           </section>
         </div>
