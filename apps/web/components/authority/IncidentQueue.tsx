@@ -14,6 +14,8 @@ interface IncidentItem {
   riskScore?: number | null;
   assignedResponderUnitId?: string | null;
   etaMinutes?: number | null;
+  transportType?: string;
+  hopCount?: number;
 }
 
 interface IncidentQueueProps {
@@ -45,6 +47,7 @@ export default function IncidentQueue({ incidents, selectedIncidentId, onSelectI
           {incidents.map((incident) => {
             const selected = selectedIncidentId === incident.incidentId;
             const critical = String(incident.severity ?? '').toLowerCase() === 'critical';
+            const isMeshRelay = incident.transportType === 'BLE_RELAY' || Boolean(incident.hopCount && incident.hopCount > 0);
             return (
               <button
                 type="button"
@@ -57,6 +60,11 @@ export default function IncidentQueue({ incidents, selectedIncidentId, onSelectI
                     <div className="flex items-center gap-2">
                       <AlertTriangle size={16} className={critical ? 'text-rose-300' : 'text-amber-300'} />
                       <span className="truncate font-mono text-sm font-semibold text-ink">{incident.incidentId}</span>
+                      {isMeshRelay && (
+                        <span className="rounded-full bg-sky-500/20 px-2 py-0.5 font-mono text-[10px] font-bold text-sky-300 border border-sky-400/30">
+                          BLE RELAY ({incident.hopCount ?? 1} Hops)
+                        </span>
+                      )}
                     </div>
                     <p className="mt-2 truncate text-sm text-ink-soft">{incident.touristName ?? incident.touristId ?? 'Traveller not recorded'}</p>
                   </div>
@@ -66,6 +74,7 @@ export default function IncidentQueue({ incidents, selectedIncidentId, onSelectI
                   <span>{incident.assignedResponderUnitId ? `Assigned: ${incident.assignedResponderUnitId}` : 'Unassigned'}</span>
                   {incident.etaMinutes != null && <span>ETA {incident.etaMinutes} min</span>}
                   {incident.riskScore != null && <span>Risk {incident.riskScore}/100</span>}
+                  {incident.transportType && <span>Via: {incident.transportType}</span>}
                 </div>
               </button>
             );

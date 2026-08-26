@@ -144,5 +144,25 @@ alter table responders enable row level security;
 alter table incidents  enable row level security;
 alter table users      enable row level security;
 
--- Deliberately no permissive policies: anon/publishable access is denied by
--- default. Add scoped policies here when real auth is introduced.
+-- ----------------------------------------------------------- ML Anomaly Tables
+create table if not exists trek_ml_config (
+  id uuid primary key default gen_random_uuid(),
+  trek_id text unique not null,
+  name text not null,
+  base_lat double precision not null,
+  base_lon double precision not null,
+  difficulty_score double precision default 2.0,
+  max_altitude_m double precision default 3000.0,
+  created_at timestamptz default now()
+);
+
+create table if not exists active_devices (
+  device_id text primary key,
+  current_lat double precision,
+  current_lon double precision,
+  safety_status text default 'SAFE',
+  updated_at timestamptz default now()
+);
+
+alter table trek_ml_config enable row level security;
+alter table active_devices enable row level security;

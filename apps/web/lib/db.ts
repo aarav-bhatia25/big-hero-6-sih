@@ -182,25 +182,68 @@ export async function replaceResponders(rows: Row[]): Promise<boolean> {
 }
 
 // ----------------------------------------------------------------- incidents
-export async function listIncidents(limit = 20): Promise<Row[]> {
+export async function listIncidents(limit = 50): Promise<Row[]> {
+  const memRows = Array.from(inMemoryIncidents.values());
   const sb = getSupabase();
-  if (!sb) return [...inMemoryIncidents.values()]
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-    .slice(0, limit);
+  if (!sb) {
+    return memRows
+      .sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime())
+      .slice(0, limit);
+  }
+
   const { data, error } = await sb
     .from("incidents").select("*")
     .order("createdAt", { ascending: false })
     .limit(limit);
+
   if (error) {
     console.warn("[prahari] listIncidents:", error.message);
-    return [...inMemoryIncidents.values()]
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    return memRows
+      .sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime())
       .slice(0, limit);
   }
-  return (data ?? []).map((dbRow) => {
-    const mem = inMemoryIncidents.get(dbRow.incidentId);
-    return mem ? { ...mem, ...dbRow, emergencyContactNotifications: dbRow.emergencyContactNotifications ?? mem.emergencyContactNotifications } : dbRow;
-  });
+
+  // Combine Supabase rows and in-memory rows so no incident is ever missed
+  const combinedMap = new Map<string, Row>();
+  for (const r of memRows) {
+    if (r.incidentId) combinedMap.set(r.incidentId, r);
+  }
+  for (const dbRow of data ?? []) {
+    if (dbRow.incidentId) {
+      const existingMem = combinedMap.get(dbRow.incidentId) ?? {};
+      combinedMap.set(dbRow.incidentId, { ...existingMem, ...dbRow });
+    }
+  }
+
+  return Array.from(combinedMap.values())
+    .sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime())
+    .slice(0, limit);
+}
+
+export async function getIncident(incidentId: string): Promise<Row | null> {
+  const mem = inMemoryIncidents.get(incidentId);
+  if (mem) return mem;
+
+  const normalized = String(incidentId).trim().toUpperCase();
+  for (const [key, val] of inMemoryIncidents.entries()) {
+    if (String(key).trim().toUpperCase() === normalized) return val;
+  }
+
+  const sb = getSupabase();
+  if (!sb) return null;
+
+  const { data, error } = await sb
+    .from("incidents")
+    .select("*")
+    .eq("incidentId", incidentId)
+    .maybeSingle();
+
+  if (error) {
+    console.warn("[prahari] getIncident error:", error.message);
+    return null;
+  }
+
+  return data ?? null;
 }
 
 const KNOWN_INCIDENT_DB_COLUMNS = new Set([
@@ -220,6 +263,8 @@ const KNOWN_INCIDENT_DB_COLUMNS = new Set([
   'timeline',
   'efirDraft',
   'resolvedAt',
+  'cancelledAt',
+  'cancelledBy',
   'createdAt',
 ]);
 
@@ -234,19 +279,15 @@ function sanitizeIncidentRowForDb(row: Row): Row {
 }
 
 export async function insertIncident(row: Row): Promise<boolean> {
-  inMemoryIncidents.set(row.incidentId, { createdAt: new Date().toISOString(), ...row });
+  const fullRow = { createdAt: new Date().toISOString(), ...row };
+  inMemoryIncidents.set(row.incidentId, fullRow);
   const sb = getSupabase();
   if (!sb) return true;
-  const { error } = await sb.from("incidents").insert(row);
+
+  const sanitized = sanitizeIncidentRowForDb(fullRow);
+  const { error } = await sb.from("incidents").insert(sanitized);
   if (error) {
     console.warn("[prahari] insertIncident:", error.message);
-    if (error.message?.includes("schema cache") || error.message?.includes("column") || error.code === 'PGRST204') {
-      const sanitized = sanitizeIncidentRowForDb(row);
-      const { error: retryErr } = await sb.from("incidents").insert(sanitized);
-      if (!retryErr) return true;
-      console.warn("[prahari] insertIncident retry:", retryErr.message);
-    }
-    return false;
   }
   return true;
 }
@@ -264,6 +305,18 @@ export async function upsertIncident(row: Row): Promise<boolean> {
       const { error: retryErr } = await sb.from("incidents").upsert(sanitized, { onConflict: "incidentId" });
       if (!retryErr) return true;
     }
+    return false;
+  }
+  return true;
+}
+
+export async function deleteIncident(incidentId: string): Promise<boolean> {
+  inMemoryIncidents.delete(incidentId);
+  const sb = getSupabase();
+  if (!sb) return true;
+  const { error } = await sb.from("incidents").delete().eq("incidentId", incidentId);
+  if (error) {
+    console.warn("[prahari] deleteIncident:", error.message);
     return false;
   }
   return true;
@@ -347,23 +400,18 @@ export async function updateIncident(incidentId: string, fields: Row): Promise<R
   const sb = getSupabase();
   if (!sb) return updatedInMemory;
 
-  const { data, error } = await sb
-    .from("incidents").update(fields).eq("incidentId", incidentId).select().maybeSingle();
+  const sanitized = sanitizeIncidentRowForDb(fields);
+  if (Object.keys(sanitized).length > 0) {
+    const { data, error } = await sb
+      .from("incidents").update(sanitized).eq("incidentId", incidentId).select().maybeSingle();
 
-  if (error) {
-    console.warn("[prahari] updateIncident:", error.message);
-    if (error.message?.includes("schema cache") || error.message?.includes("column") || error.code === 'PGRST204') {
-      const sanitized = sanitizeIncidentRowForDb(fields);
-      if (Object.keys(sanitized).length > 0) {
-        const { data: retryData, error: retryErr } = await sb
-          .from("incidents").update(sanitized).eq("incidentId", incidentId).select().maybeSingle();
-        if (!retryErr) return { ...updatedInMemory, ...(retryData || {}) };
-        console.warn("[prahari] updateIncident retry failed:", retryErr.message);
-      }
+    if (error) {
+      console.warn("[prahari] updateIncident:", error.message);
+    } else if (data) {
+      return { ...updatedInMemory, ...data };
     }
-    return updatedInMemory;
   }
-  return data ? { ...updatedInMemory, ...data } : updatedInMemory;
+  return updatedInMemory;
 }
 
 // ------------------------------------------------------------- kyc sessions

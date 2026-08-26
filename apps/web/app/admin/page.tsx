@@ -17,6 +17,8 @@ import {
 } from 'lucide-react';
 import MapView from '@/components/maps/MapView';
 import IncidentQueue from '@/components/authority/IncidentQueue';
+import MeshRouteBadge from '@/components/authority/MeshRouteBadge';
+import AuthorityEmergencyChat from '@/components/authority/AuthorityEmergencyChat';
 import { subscribeToPrahariLive } from '@/lib/supabaseRealtime';
 
 type DashboardStats = {
@@ -249,6 +251,44 @@ export default function AdminPage() {
     }
   };
 
+  const handleResolveIncident = async () => {
+    if (!selectedIncident) return;
+    try {
+      const response = await fetch('/api/incidents', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          incidentId: selectedIncident.incidentId,
+          status: 'RESOLVED',
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error ?? 'Unable to resolve incident.');
+      setSelectedIncident(null);
+      void fetchDashboardData(true);
+    } catch (error: any) {
+      window.alert(error.message ?? 'Unable to resolve incident.');
+    }
+  };
+
+  const handleDeleteIncident = async () => {
+    if (!selectedIncident) return;
+    const confirmed = window.confirm(`Permanently delete incident ${selectedIncident.incidentId}?`);
+    if (!confirmed) return;
+
+    try {
+      const response = await fetch(`/api/incidents?incidentId=${encodeURIComponent(selectedIncident.incidentId)}`, {
+        method: 'DELETE',
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error ?? 'Unable to delete incident.');
+      setSelectedIncident(null);
+      void fetchDashboardData(true);
+    } catch (error: any) {
+      window.alert(error.message ?? 'Unable to delete incident.');
+    }
+  };
+
   const handleEfirAction = async (incidentId: string, action: 'APPROVE' | 'REJECT') => {
     try {
       const response = await fetch('/api/efir', {
@@ -364,6 +404,7 @@ export default function AdminPage() {
           <Metric label="Available responders" value={stats ? `${stats.respondersAvailable}/${stats.respondersTotal}` : undefined} icon={<Radio size={20} />} />
         </section>
 
+
         <section className="mt-7 grid gap-5 xl:grid-cols-[minmax(0,1.65fr)_minmax(340px,0.85fr)]">
           <div className="minimal-card p-5 sm:p-6">
             <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
@@ -392,17 +433,36 @@ export default function AdminPage() {
             {investigationData.loading ? (
               <div className="flex min-h-40 items-center justify-center gap-2 text-sm text-ink-soft"><RefreshCw size={16} className="animate-spin" />Loading authorised record…</div>
             ) : (
-              <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                <InfoCard label="Traveller" value={investigationData.tourist?.name ?? selectedIncident.touristName ?? selectedIncident.touristId ?? 'Not recorded'} detail={investigationData.tourist?.did ?? 'No credential DID on record'} />
-                <InfoCard label="Identity status" value={investigationData.tourist?.identityStatus ? String(investigationData.tourist.identityStatus).replaceAll('_', ' ') : 'Not recorded'} detail={investigationData.tourist?.nationality ?? 'Nationality not recorded'} />
-                <InfoCard label="Location history" value={investigationData.locations.length ? `${investigationData.locations.length} recorded ping${investigationData.locations.length === 1 ? '' : 's'}` : 'No recorded location history'} detail={investigationData.locations[0] ? coordinatesForDisplay(investigationData.locations[0].coordinates ?? investigationData.locations[0]) : undefined} />
-                <InfoCard label="Responder" value={selectedIncident.assignedResponderUnitId ?? 'Unassigned'} detail={selectedIncident.etaMinutes != null ? `ETA ${selectedIncident.etaMinutes} min` : 'No ETA reported'} />
+              <div className="mt-5 space-y-4">
+                <MeshRouteBadge
+                  transportType={selectedIncident.transportType}
+                  hopCount={selectedIncident.hopCount}
+                  originDeviceId={selectedIncident.originDeviceId}
+                  originalTimestamp={selectedIncident.originalTimestamp || selectedIncident.createdAt}
+                  receivedTimestamp={selectedIncident.createdAt}
+                  relayPath={selectedIncident.relayPath}
+                />
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                  <InfoCard label="Traveller" value={investigationData.tourist?.name ?? selectedIncident.touristName ?? selectedIncident.touristId ?? 'Not recorded'} detail={investigationData.tourist?.did ?? 'No credential DID on record'} />
+                  <InfoCard label="Identity status" value={investigationData.tourist?.identityStatus ? String(investigationData.tourist.identityStatus).replaceAll('_', ' ') : 'Not recorded'} detail={investigationData.tourist?.nationality ?? 'Nationality not recorded'} />
+                  <InfoCard label="Location history" value={investigationData.locations.length ? `${investigationData.locations.length} recorded ping${investigationData.locations.length === 1 ? '' : 's'}` : 'No recorded location history'} detail={investigationData.locations[0] ? coordinatesForDisplay(investigationData.locations[0].coordinates ?? investigationData.locations[0]) : undefined} />
+                  <InfoCard label="Responder" value={selectedIncident.assignedResponderUnitId ?? 'Unassigned'} detail={selectedIncident.etaMinutes != null ? `ETA ${selectedIncident.etaMinutes} min` : 'No ETA reported'} />
+                </div>
               </div>
             )}
 
+            <AuthorityEmergencyChat
+              incidentId={selectedIncident.incidentId}
+              touristName={selectedIncident.touristName ?? selectedIncident.touristId}
+            />
+
             <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-5">
               <p className="text-sm text-ink-soft">Emergency contacts and additional identity data are shown only through the authorised investigation record.</p>
-              <button onClick={handleDispatch} className="minimal-button minimal-button-primary" disabled={!responders.some(isAvailable)}>Dispatch available responder</button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button onClick={handleDispatch} className="minimal-button minimal-button-primary" disabled={!responders.some(isAvailable)}>Dispatch responder</button>
+                <button onClick={handleResolveIncident} className="minimal-button border border-emerald-500/50 bg-emerald-600/20 text-emerald-300 hover:bg-emerald-600/30">Resolve incident</button>
+                <button onClick={handleDeleteIncident} className="minimal-button border border-rose-500/50 bg-rose-600/20 text-rose-300 hover:bg-rose-600/30">Delete incident</button>
+              </div>
             </div>
           </section>
         )}

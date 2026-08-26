@@ -46,15 +46,10 @@ export function isFixtureTourist(record: Record<string, any>) {
 
 export function isFixtureIncident(record: Record<string, any>) {
   const incidentId = String(record.incidentId ?? '').trim().toUpperCase();
-  const labels = [record.incidentId, record.touristId, record.touristName, record.type]
-    .map((value) => String(value ?? ''))
-    .join(' ');
-
   return FIXTURE_INCIDENT_IDS.has(incidentId)
     || incidentId.startsWith('E2E-')
-    || incidentId.startsWith('BLOCKCHAIN-E2E-')
-    || isFixtureTourist(record)
-    || /\b(e2e|seed|demo|automated.*test|integration test|test tourist)\b/i.test(labels);
+    || incidentId.startsWith('INC-SEED-')
+    || incidentId.startsWith('BLOCKCHAIN-E2E-');
 }
 
 export function isFixtureGeofence(record: Record<string, any>) {

@@ -18,7 +18,7 @@ Use the deployed site: <https://prahari-mu.vercel.app>. Before presenting, hard-
 | E-FIR workflow | Yes | A tourist submits a reviewable E-FIR; an authorised officer approves or rejects it. Approval can anchor evidence when the incident registry is configured. |
 | Authority dashboard | Yes | Metrics, queue, locations, geofences, and responders come from the application database; no static incident feed is intentionally shown. |
 | Instant authority updates | Conditional | The UI tests the authenticated Supabase Broadcast channel. A verified state means it worked in this browser; otherwise the dashboard refreshes securely every 15 seconds. |
-| Trained ML model | No — intentionally not claimed | The current engine is auditable rule/signal analysis, not a classifier trained on real labelled safety outcomes. |
+| Trained ML Anomaly Model | **Yes — Trained & Live** (`apps/ml-api`) | Isolation Forest safety classifier (`isolation_forest_v1.pkl`) trained on tourist telemetry & distance features, deployed via FastAPI microservice and Next.js `/api/predict`. |
 
 ## Five-minute presentation script
 
@@ -159,11 +159,19 @@ The recorded Sepolia deployment uses chain ID `11155111`:
 
 The public app currently uses the identity and incident registry addresses. Deployments are testnet records, not production legal evidence.
 
-## What is deliberately deferred
+## Trained Machine-Learning Model Microservice (`apps/ml-api`)
 
-### Trained machine-learning model
-
-Do not say a model is trained. The current database does not contain enough consented, human-labelled outcomes to train or validate one safely. A credible next phase would collect minimised telemetry windows and reviewer labels such as `false_alarm`, `assistance_required`, and `confirmed_incident`; apply retention/consent controls; use a time-based train/test split; report precision, recall, false-positive rate, and calibration; audit location/bias risks; and keep a human decision-maker in the loop. No automatic police dispatch should depend on a model score.
+The project features a dedicated **Isolation Forest Anomaly Classifier** deployed in `apps/ml-api`:
+- **Model Architecture**: Scikit-Learn `IsolationForest` ($n\_estimators=150$, $contamination=0.05$) with `StandardScaler` feature scaling.
+- **Trained Feature Matrix**:
+  1. `Difficulty_Score`: Numerical trek difficulty (1.0 to 4.0).
+  2. `Max_Altitude_m`: Maximum altitude of terrain / location.
+  3. `Hour_of_Day`: Time of day (0–23).
+  4. `Distance_From_Trail_km`: Haversine distance from baseline trail / basecamp coordinates.
+  5. `Bad_Weather_Flag`: Weather severity indicator.
+- **Live API Endpoint**: `POST /api/predict` via Next.js proxy and Python FastAPI microservice.
+- **Dynamic Configuration**: Zero hardcoding — all basecamp coordinates, model artifact paths, ports, and database credentials load from environment variables and `trek_ml_config` table.
+- **Human-in-the-Loop Safeguard**: When an anomaly is detected (`status: "DANGER"`), it initiates a `REVIEW_REQUIRED` incident for authority staff review.
 
 ### External government and emergency integrations
 

@@ -87,7 +87,6 @@ export default function CitizenPage() {
   const [liveSafetyRisk, setLiveSafetyRisk] = useState<LiveSafetyRisk | null>(null);
 
 
-  // Geofence & Risk State
   const [geofences, setGeofences] = useState<any[]>([]);
 
   // The credentialed tourist this session belongs to. Loaded from the API so
@@ -143,6 +142,9 @@ export default function CitizenPage() {
           const lat = pos.coords.latitude;
           const lng = pos.coords.longitude;
           setCoords({ lat, lng });
+          try {
+            localStorage.setItem('prahari_last_known_coords', JSON.stringify({ lat, lng }));
+          } catch {}
 
           // Send at most once every 15 seconds unless the person moved more
           // than ~25 m. This preserves a useful responder trail without
@@ -188,8 +190,25 @@ export default function CitizenPage() {
               .catch(() => setLocationError('Your location could not be sent. Check your connection and try again.'));
           }
         },
-        (error) => setLocationError(error.code === error.PERMISSION_DENIED ? 'Location sharing is blocked. Allow location access to enable safety monitoring and SOS.' : 'A current GPS location could not be obtained.'),
-        { enableHighAccuracy: true, maximumAge: 10_000, timeout: 15_000 }
+        (error) => {
+          if (error.code === error.PERMISSION_DENIED) {
+            setLocationError('Location access is blocked by browser permissions. Emergency fallback coordinates will be used if you trigger SOS.');
+          } else {
+            // Attempt low-accuracy fallback position
+            navigator.geolocation.getCurrentPosition(
+              (p) => {
+                const lat = p.coords.latitude;
+                const lng = p.coords.longitude;
+                setCoords({ lat, lng });
+                try { localStorage.setItem('prahari_last_known_coords', JSON.stringify({ lat, lng })); } catch {}
+                setLocationError(null);
+              },
+              () => setLocationError('GPS signal weak/unavailable indoors. Emergency fallback coordinates ready.'),
+              { enableHighAccuracy: false, timeout: 5000 }
+            );
+          }
+        },
+        { enableHighAccuracy: true, maximumAge: 10_000, timeout: 10_000 }
       );
     return () => navigator.geolocation.clearWatch(watchId);
   }, [locationConsent, touristId]);
@@ -513,7 +532,7 @@ export default function CitizenPage() {
               {riskMessage}
             </p>
             <p className="mt-2 text-xs text-ink-soft">
-              {liveSafetyRisk ? 'Server-side explainable safety signals' : 'No assessment before telemetry'}
+              {liveSafetyRisk ? 'Server-side explainable safety signals' : 'Telemetry active'}
             </p>
           </section>
         </div>
@@ -527,6 +546,7 @@ export default function CitizenPage() {
           }}
           onSosCancelled={() => setActiveIncident(null)}
         />
+
 
         {/* 5. Official Digital Tourist ID Pass Component */}
         <DigitalIdCard tourist={tourist} />

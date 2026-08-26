@@ -107,12 +107,13 @@ export async function POST(request: NextRequest) {
     if (!await updateTourist(touristId, {
       currentLocation: { lat, lng, accuracy, timestamp: ping.timestamp },
       riskScore: safety.score,
+      status: tourist?.status ?? "SAFE",
     })) {
       return NextResponse.json({ success: false, error: 'Your location was saved, but the safety assessment could not be recorded.' }, { status: 503 });
     }
 
-    // Broadcast the location update to the authorised staff dashboard.
-    await emitToGateway("tourist:location", { touristId, lat, lng, timestamp: ping.timestamp, safety });
+    // Broadcast the location update and ML safety assessment to authority staff dashboard & citizen client.
+    await emitToGateway("tourist:location", { touristId, lat, lng, timestamp: ping.timestamp, safety, mlSafety });
 
     try {
       if (check.isBreached && check.breachedZone) {
