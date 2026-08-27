@@ -4,10 +4,7 @@ import { notifyEmergencyContacts } from '@/lib/services/emergencyNotifications';
 
 export const dynamic = 'force-dynamic';
 
-/**
- * Sends one explicitly requested, clearly labelled delivery test. This is
- * intentionally staff-only and never uses a real incident's contact list.
- */
+/** Sends one explicitly requested, clearly labelled email delivery test. */
 export async function POST(request: NextRequest) {
   const auth = await requireAuth(request, ['admin', 'authority']);
   if (auth.errorResponse) return auth.errorResponse;
@@ -22,7 +19,7 @@ export async function POST(request: NextRequest) {
     const testId = `NOTIFY-TEST-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
     const delivery = await notifyEmergencyContacts(
       [{ name: 'Prahari delivery test', relationship: 'Test recipient', email: recipient }],
-      testId
+      testId,
     );
 
     return NextResponse.json({

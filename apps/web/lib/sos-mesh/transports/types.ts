@@ -4,7 +4,7 @@
 
 import { SOSPacket } from '../sosPacket';
 
-export type TransportChannel = 'INTERNET' | 'SMS' | 'BLE_RELAY' | 'LOCAL_QUEUE';
+export type TransportChannel = 'INTERNET' | 'BLE_RELAY' | 'LOCAL_QUEUE';
 
 export interface TransportResult {
   success: boolean;

@@ -1,13 +1,12 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   MapPin,
   FileText,
   Shirt,
   Globe,
   Radio,
-  CheckCircle2,
   X,
   RefreshCw,
   Mic,
@@ -18,6 +17,9 @@ import {
 import DigitalIdCard from '@/components/tourist/DigitalIdCard';
 import SosButton from '@/components/tourist/SosButton';
 import MapView from '@/components/maps/MapView';
+import OfflineMapPackStatus from '@/components/offline/OfflineMapPackStatus';
+import EmergencyIdentificationProfile from '@/components/tourist/EmergencyIdentificationProfile';
+import TravellerVoiceAssistant from '@/components/tourist/TravellerVoiceAssistant';
 
 type LiveSafetyRisk = {
   score: number;
@@ -26,15 +28,23 @@ type LiveSafetyRisk = {
   signals?: Array<{ code: string; message: string }>;
 };
 
-const LANG_MAP: Record<string, string> = {
-  'Hindi (हिंदी)': 'hi-IN',
-  'Marathi (मराठी)': 'mr-IN',
-  'Bengali (বাংলা)': 'bn-IN',
-  'Tamil (தமிழ்)': 'ta-IN',
-  'Telugu (తెలుగు)': 'te-IN',
-  'Gujarati (ગુજરાતી)': 'gu-IN',
-  'Kannada (ಕನ್ನಡ)': 'kn-IN',
-  'English': 'en-IN',
+type NearbyHazard = {
+  id: string;
+  hazard: string;
+  severity: string;
+  reportedSeverity?: string;
+  severityColor: string | null;
+  likelihood: string | null;
+  message: string;
+  areaDescription: string;
+  source: string;
+  language: string | null;
+  startsAt: string | null;
+  endsAt: string | null;
+  distanceKm: number | null;
+  approximateCoverageRadiusKm: number | null;
+  matchPrecision: 'centroid-and-reported-area' | 'area-not-geocoded';
+  officialUrl: string;
 };
 
 export default function CitizenPage() {
@@ -43,22 +53,16 @@ export default function CitizenPage() {
   const [locationConsent, setLocationConsent] = useState(true);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [safetyAlert, setSafetyAlert] = useState<string | null>(null);
+  const [nearbyHazards, setNearbyHazards] = useState<NearbyHazard[]>([]);
+  const [hazardFeedStatus, setHazardFeedStatus] = useState<'available' | 'stale' | 'unavailable' | null>(null);
+  const [hazardFeedMessage, setHazardFeedMessage] = useState<string | null>(null);
   const [activeModal, setActiveModal] = useState<'none' | 'id_pass' | 'efir' | 'attire' | 'voice'>('none');
   
   // Incident & SOS state
   const [activeIncident, setActiveIncident] = useState<any | null>(null);
 
-  // Clothing Profile Form State
-  const [attireForm, setAttireForm] = useState({
-    top: '',
-    bottom: '',
-    footwear: '',
-    accessories: '',
-  });
-  const [attireSaved, setAttireSaved] = useState(false);
-  const [attireError, setAttireError] = useState<string | null>(null);
-
-  // E-FIR State
+  // Police-ready incident draft state. Prahari does not submit directly to a
+  // State/UT police system or claim that an FIR has been registered.
   const [efirData, setEfirData] = useState<any | null>(null);
   const [efirLoading, setEfirLoading] = useState(false);
   const [efirError, setEfirError] = useState<string | null>(null);
@@ -76,13 +80,6 @@ export default function CitizenPage() {
     declarationAccepted: false,
   });
 
-  // Multilingual Voice State
-  const [listening, setListening] = useState(false);
-  const [voiceText, setVoiceText] = useState('');
-  const [transcribedText, setTranscribedText] = useState('');
-  const [selectedLang, setSelectedLang] = useState('Hindi (हिंदी)');
-  const [voiceError, setVoiceError] = useState<string | null>(null);
-
   // The score is returned by the server after it receives actual consented telemetry.
   const [liveSafetyRisk, setLiveSafetyRisk] = useState<LiveSafetyRisk | null>(null);
 
@@ -96,6 +93,7 @@ export default function CitizenPage() {
   const touristId: string | null = tourist?.touristId ?? null;
 
   const lastTelemetryRef = useRef<{ lat: number; lng: number; sentAt: number } | null>(null);
+  const notifiedHazardIdsRef = useRef(new Set<string>());
 
   // Load the authenticated identity and published geofences once.
   useEffect(() => {
@@ -104,22 +102,42 @@ export default function CitizenPage() {
     else if (hour < 17) setGreeting('Good afternoon');
     else setGreeting('Good evening');
 
-    fetch('/api/geofences')
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.geofences) setGeofences(data.geofences);
-      })
-      .catch(console.error);
-
-    fetch('/api/tourists')
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success && data.tourist) {
-          setTourist(data.tourist);
-          if (typeof data.tourist.trackingConsent === 'boolean') setLocationConsent(data.tourist.trackingConsent);
+    let cancelled = false;
+    void (async () => {
+      try {
+        const authResponse = await fetch('/api/auth/me', { cache: 'no-store' });
+        const auth = await authResponse.json().catch(() => null);
+        const role = auth?.user?.role;
+        if (!authResponse.ok || !auth?.authenticated || role !== 'tourist') {
+          const destination = ['authority', 'admin', 'responder'].includes(role) ? '/authority' : '/login?redirect=/citizen';
+          window.location.assign(destination);
+          return;
         }
-      })
-      .catch(console.error);
+
+        const [geofenceResponse, touristResponse] = await Promise.all([
+          fetch('/api/geofences'),
+          fetch('/api/tourists'),
+        ]);
+        const [geofenceData, touristData] = await Promise.all([
+          geofenceResponse.json().catch(() => null),
+          touristResponse.json().catch(() => null),
+        ]);
+        if (cancelled) return;
+
+        if (!touristResponse.ok || !touristData?.success || !touristData?.tourist) {
+          window.location.assign('/login?redirect=/citizen');
+          return;
+        }
+        if (geofenceResponse.ok && geofenceData?.geofences) setGeofences(geofenceData.geofences);
+        setTourist(touristData.tourist);
+        if (typeof touristData.tourist.trackingConsent === 'boolean') setLocationConsent(touristData.tourist.trackingConsent);
+      } catch (error) {
+        console.error('Unable to establish the traveller session:', error);
+        window.location.assign('/login?redirect=/citizen');
+      }
+    })();
+
+    return () => { cancelled = true; };
 
   }, []);
 
@@ -175,6 +193,21 @@ export default function CitizenPage() {
                   return;
                 }
                 setLocationError(null);
+                if (data.hazards) {
+                  const hazards = Array.isArray(data.hazards.alerts) ? data.hazards.alerts as NearbyHazard[] : [];
+                  setNearbyHazards(hazards);
+                  setHazardFeedStatus(data.hazards.status || 'unavailable');
+                  setHazardFeedMessage(data.hazards.error || null);
+
+                  const newHazard = hazards.find((hazard) => !notifiedHazardIdsRef.current.has(hazard.id));
+                  hazards.forEach((hazard) => notifiedHazardIdsRef.current.add(hazard.id));
+                  if (newHazard && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+                    new Notification(`Prahari: ${newHazard.hazard}`, {
+                      body: `${newHazard.severity} advisory for ${newHazard.areaDescription}. Open Prahari for official guidance.`,
+                      tag: `prahari-hazard-${newHazard.id}`,
+                    });
+                  }
+                }
                 if (!data?.safety) return;
                 setLiveSafetyRisk({
                   score: data.safety.score,
@@ -255,33 +288,23 @@ export default function CitizenPage() {
     }
   };
 
-  // Handle Save Clothing Profile
-  const handleSaveAttire = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      setAttireError(null);
-      const response = await fetch('/api/attire', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ touristId, ...attireForm }),
-      });
-      const data = await response.json().catch(() => null);
-      if (!response.ok || !data?.success) throw new Error(data?.error || 'The attire record could not be saved.');
-      setAttireSaved(true);
-      setTimeout(() => {
-        setAttireSaved(false);
-        setActiveModal('none');
-      }, 1500);
-    } catch (err: any) {
-      setAttireError(err.message || 'The attire record could not be saved.');
+  const enableHazardNotifications = async () => {
+    if (typeof Notification === 'undefined') {
+      setHazardFeedMessage('This browser does not support local alert pop-ups. In-app alerts remain available.');
+      return;
+    }
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') {
+      setHazardFeedMessage('Local alert pop-ups were not enabled. You can still see official alerts in this dashboard.');
+    } else {
+      setHazardFeedMessage('Local alert pop-ups are enabled while Prahari is open.');
     }
   };
 
-
-  // Handle Generate E-FIR Draft
+  // Handle creation of a factual, police-ready incident draft.
   const handleGenerateEfir = async () => {
     if (!touristId || !coords) {
-      setEfirError('A verified tourist ID and current GPS location are required before filing an E-FIR.');
+      setEfirError('A verified tourist ID and current GPS location are required before preparing this report draft.');
       return;
     }
 
@@ -296,7 +319,8 @@ export default function CitizenPage() {
           touristId,
           touristName: tourist?.name,
           passportAadhaar: tourist?.credential?.credentialSubject?.identityDocument?.masked,
-          incidentType: activeIncident?.type || 'E-FIR report',
+          incidentType: activeIncident?.type || 'Incident information',
+          reportType: efirForm.category === 'Missing person concern' ? 'MISSING_PERSON_INFORMATION_DRAFT' : 'INCIDENT_INFORMATION_DRAFT',
           incidentCategory: efirForm.category,
           occurrenceAt: efirForm.occurrenceAt || null,
           narrative: efirForm.narrative,
@@ -308,115 +332,22 @@ export default function CitizenPage() {
           callbackNumber: efirForm.callbackNumber,
           declarationAccepted: efirForm.declarationAccepted,
           location: { ...coords },
-          clothingProfile: [attireForm.top, attireForm.bottom, attireForm.footwear, attireForm.accessories].filter(Boolean).join(', ') || undefined,
+          clothingProfile: tourist?.clothingProfile?.summary || undefined,
         }),
       });
       const data = await res.json();
       if (data.success && data.efir) {
         setEfirData(data.efir);
       } else {
-        setEfirError(data.error || 'The E-FIR could not be submitted.');
+        setEfirError(data.error || 'The report draft could not be saved.');
       }
     } catch (err) {
       console.error(err);
-      setEfirError('The E-FIR could not be submitted. Check your connection and try again.');
+      setEfirError('The report draft could not be saved. Check your connection and try again.');
     } finally {
       setEfirLoading(false);
     }
   };
-
-  // ── Sarvam AI Speech-to-Text Integration (saarika:v2) ───────
-  const recognitionRef = useRef<any>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-
-  const handleStartVoice = useCallback(async () => {
-    setVoiceError(null);
-    setTranscribedText('');
-    setVoiceText('Initializing Sarvam AI (saarika:v2.5)...');
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      audioChunksRef.current = [];
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data && event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-
-      mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        setVoiceText('Transcribing speech via Sarvam AI (saarika:v2.5)...');
-        
-        try {
-          const formData = new FormData();
-          formData.append('file', audioBlob, 'sos_distress.webm');
-          formData.append('language_code', LANG_MAP[selectedLang] || 'hi-IN');
-
-          const res = await fetch('/api/sarvam/speech-to-text', {
-            method: 'POST',
-            body: formData,
-          });
-          const data = await res.json();
-          if (data.success && data.transcript) {
-            setTranscribedText(data.transcript);
-            setVoiceText('Transcription completed!');
-          } else {
-            setVoiceError(data.error || 'Failed to transcribe audio via Sarvam AI.');
-          }
-        } catch (err: any) {
-          setVoiceError('Network error invoking Sarvam AI speech-to-text.');
-        }
-      };
-
-      mediaRecorder.start();
-      setListening(true);
-      setVoiceText('Recording distress audio for Sarvam AI... Speak now!');
-    } catch (err: any) {
-      // Fallback to browser SpeechRecognition if MediaRecorder is unavailable
-      const SpeechRecognition =
-        (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-
-      if (!SpeechRecognition) {
-        setVoiceError('Microphone permission denied or unsupported browser.');
-        return;
-      }
-
-      const recognition = new SpeechRecognition();
-      recognitionRef.current = recognition;
-      recognition.lang = LANG_MAP[selectedLang] || 'hi-IN';
-      
-      recognition.onstart = () => {
-        setListening(true);
-        setVoiceText('Listening (Browser Speech Fallback)...');
-      };
-      recognition.onresult = (event: any) => {
-        const text = event.results[0][0].transcript;
-        setTranscribedText(text);
-        setVoiceText('Transcription completed!');
-      };
-      recognition.onerror = (e: any) => {
-        setListening(false);
-        setVoiceError(e.error || 'Speech recognition error.');
-      };
-      recognition.onend = () => setListening(false);
-      recognition.start();
-    }
-  }, [selectedLang]);
-
-  const handleStopVoice = useCallback(() => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-      mediaRecorderRef.current.stop();
-      mediaRecorderRef.current.stream.getTracks().forEach((track) => track.stop());
-    }
-    if (recognitionRef.current) {
-      try { recognitionRef.current.stop(); } catch {}
-    }
-    setListening(false);
-  }, []);
 
   const openAuthorityCommand = async () => {
     try {
@@ -438,7 +369,7 @@ export default function CitizenPage() {
     <div className="minimal-page min-h-screen pb-12 font-sans">
       <header className="minimal-nav">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight text-ink">Prahari</h1>
+          <h1 className="ui-display text-2xl text-ink">Prahari</h1>
           <p className="mt-0.5 text-sm text-ink-soft">Your safety dashboard</p>
         </div>
 
@@ -467,11 +398,11 @@ export default function CitizenPage() {
                 <span className="text-xs font-medium text-ink-soft">
                   Digital ID · {tourist?.touristId || 'Loading…'}
                 </span>
-                <span className="rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs font-semibold text-emerald-300">
+                <span className="rounded-full border border-emerald-600/20 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
                   {tourist?.identityStatus?.toUpperCase() || 'LOADING'}
                 </span>
               </div>
-              <h2 className="text-2xl font-semibold tracking-tight text-ink">{greeting}{tourist?.name ? `, ${tourist.name}` : ""}</h2>
+              <h2 className="ui-display text-3xl text-ink">{greeting}{tourist?.name ? `, ${tourist.name}` : ""}</h2>
               <p className="max-w-2xl text-sm leading-6 text-ink-soft">
                 {tourist?.did
                   ? <>Your Digital Tourist ID (<span className="font-mono">{tourist.did}</span>) is active. Safety analysis begins only after you share a current location.</>
@@ -488,7 +419,7 @@ export default function CitizenPage() {
                 disabled={!touristId}
                 className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
                   locationConsent
-                    ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-300'
+                    ? 'border-emerald-600/25 bg-emerald-50 text-emerald-700'
                     : 'border-line bg-surface-2 text-ink-soft'
                 }`}
               >
@@ -538,6 +469,62 @@ export default function CitizenPage() {
           </section>
         </div>
 
+        <section className={`minimal-card border-l-4 p-5 ${
+          nearbyHazards.length
+            ? 'border-l-amber-500'
+            : hazardFeedStatus === 'unavailable'
+              ? 'border-l-slate-400'
+              : 'border-l-emerald-500'
+        }`} aria-live="polite">
+          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-line pb-3">
+            <div>
+              <h3 className="flex items-center gap-2 font-semibold text-ink">
+                <AlertTriangle className="size-4 text-amber-500" /> Official local hazard alerts
+              </h3>
+              <p className="mt-1 text-xs leading-5 text-ink-soft">
+                From NDMA SACHET for your shared GPS location. Matches use the publisher&apos;s centroid and reported coverage area, so they are approximate rather than a boundary check.
+              </p>
+            </div>
+            {typeof Notification !== 'undefined' && Notification.permission !== 'granted' && (
+              <button onClick={enableHazardNotifications} className="minimal-button minimal-button-secondary px-3 py-1.5 text-xs">
+                Enable local pop-ups
+              </button>
+            )}
+          </div>
+
+          {hazardFeedStatus === 'unavailable' ? (
+            <p className="mt-3 text-sm text-ink-soft">{hazardFeedMessage || 'The official alert feed is unavailable. This is not an all-clear signal; check NDMA SACHET directly if you are in danger.'}</p>
+          ) : nearbyHazards.length ? (
+            <div className="mt-3 space-y-3">
+              {nearbyHazards.slice(0, 3).map((hazard) => (
+                <article key={hazard.id} className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <strong className="text-ink">{hazard.hazard}</strong>
+                    <span className="rounded-full border border-amber-500/40 px-2 py-0.5 text-[11px] font-bold text-amber-800 dark:text-amber-300">
+                      {hazard.severity}
+                      {hazard.reportedSeverity && hazard.reportedSeverity.toUpperCase() !== hazard.severity ? ` · issued as ${hazard.reportedSeverity}` : ''}
+                    </span>
+                  </div>
+                  <p className="mt-1.5 leading-6 text-ink-soft">{hazard.message}</p>
+                  <p className="mt-2 text-xs text-ink-soft">
+                    {hazard.source} · {hazard.areaDescription}
+                    {typeof hazard.distanceKm === 'number' ? ` · approx. ${hazard.distanceKm.toFixed(1)} km from alert centroid` : ''}
+                  </p>
+                  <a href={hazard.officialUrl} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs font-semibold text-brand-600 underline">
+                    View official NDMA guidance
+                  </a>
+                </article>
+              ))}
+            </div>
+          ) : hazardFeedStatus ? (
+            <p className="mt-3 text-sm text-ink-soft">No currently matching NDMA advisory was found near your latest shared location.</p>
+          ) : (
+            <p className="mt-3 text-sm text-ink-soft">Share a current location to check nearby official hazards.</p>
+          )}
+          {hazardFeedStatus === 'stale' && <p className="mt-3 text-xs text-amber-700 dark:text-amber-300">{hazardFeedMessage}</p>}
+          {hazardFeedMessage && hazardFeedStatus !== 'stale' && hazardFeedStatus !== 'unavailable' && <p className="mt-3 text-xs text-ink-soft">{hazardFeedMessage}</p>}
+        </section>
+
         {/* 4. Signature SOS Button Component */}
         <SosButton
           touristPos={coords ?? undefined}
@@ -552,7 +539,7 @@ export default function CitizenPage() {
         {/* 5. Official Digital Tourist ID Pass Component */}
         <DigitalIdCard tourist={tourist} />
 
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <button
             onClick={() => {
               setActiveModal('efir');
@@ -562,10 +549,9 @@ export default function CitizenPage() {
             <div className="rounded-lg bg-sky-400/10 p-3 text-sky-400">
               <FileText className="w-5 h-5" />
             </div>
-            <span><span className="block font-semibold text-ink">File an E-FIR</span><span className="mt-1 block text-sm text-ink-soft">Submit a factual report for officer review.</span></span>
+            <span><span className="block font-semibold text-ink">Prepare police-ready report</span><span className="mt-1 block text-sm text-ink-soft">Create a factual draft for authorised review; it is not a police filing.</span></span>
           </button>
 
-          {/* AI Attire Profile Button */}
           <button
             onClick={() => setActiveModal('attire')}
             className="minimal-card minimal-card-link flex items-center gap-4 p-5 text-left"
@@ -573,7 +559,17 @@ export default function CitizenPage() {
             <div className="rounded-lg bg-sky-400/10 p-3 text-sky-400">
               <Shirt className="w-5 h-5" />
             </div>
-            <span><span className="block font-semibold text-ink">Visual attire record</span><span className="mt-1 block text-sm text-ink-soft">Optional details that may help after an emergency.</span></span>
+            <span><span className="block font-semibold text-ink">Emergency identification</span><span className="mt-1 block text-sm text-ink-soft">Photo or text becomes a structured description for authorised cases.</span></span>
+          </button>
+
+          <button
+            onClick={() => setActiveModal('voice')}
+            className="minimal-card minimal-card-link flex items-center gap-4 p-5 text-left"
+          >
+            <div className="rounded-lg bg-red-500/10 p-3 text-red-500">
+              <Mic className="w-5 h-5" />
+            </div>
+            <span><span className="block font-semibold text-ink">Voice emergency help</span><span className="mt-1 block text-sm text-ink-soft">Speak, translate, replay, or send a reviewed voice SOS.</span></span>
           </button>
 
         </div>
@@ -600,6 +596,8 @@ export default function CitizenPage() {
           />
         </section>
 
+        <OfflineMapPackStatus />
+
         <footer className="minimal-footer rounded-xl border border-line">
           <div className="flex items-center gap-2">
             <PhoneCall className="size-4 text-sky-400" />
@@ -610,7 +608,7 @@ export default function CitizenPage() {
         </footer>
       </main>
 
-      {/* MODAL 1: E-FIR Auto Generator */}
+      {/* Police-ready incident draft */}
       {activeModal === 'efir' && (
         <div className="fixed inset-0 z-50 bg-surface-2/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-lg rounded-nb border-2 border-line bg-surface p-6 shadow-nb relative text-ink space-y-4">
@@ -626,8 +624,8 @@ export default function CitizenPage() {
                 <FileText className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="font-serif font-bold text-lg text-ink">E-FIR complaint</h3>
-                <p className="text-xs text-ink-soft font-mono">Under Section 154 Code of Criminal Procedure (CrPC)</p>
+                <h3 className="font-serif font-bold text-lg text-ink">Police-ready incident draft</h3>
+                <p className="text-xs text-ink-soft font-mono">BNSS 2023, section 173 · not a police receipt</p>
               </div>
             </div>
 
@@ -636,12 +634,12 @@ export default function CitizenPage() {
             {efirLoading ? (
               <div className="py-10 flex flex-col items-center justify-center text-ink-soft text-xs gap-2 font-mono">
                 <RefreshCw className="w-6 h-6 animate-spin text-ink" />
-                <span>Submitting your report to the district police queue...</span>
+                <span>Saving your report draft for authorised review…</span>
               </div>
             ) : efirData ? (
               <div className="space-y-2.5 text-xs bg-surface-2 p-4 rounded border-2 border-line">
                 <div className="flex justify-between border-b-2 border-line pb-2 font-mono">
-                  <span className="text-ink-soft">DRAFT E-FIR TICKET:</span>
+                  <span className="text-ink-soft">PRAHARI REPORT DRAFT:</span>
                   <span className="font-bold text-ink">{efirData.efirId}</span>
                 </div>
                 <div className="flex justify-between">
@@ -665,13 +663,16 @@ export default function CitizenPage() {
                   <span className="text-ink">{efirData.clothingProfile}</span>
                 </div>
                 <div className="flex justify-between border-t-2 border-line pt-2 text-success font-bold font-mono">
-                  <span>OFFICER VERIFICATION:</span>
+                  <span>AUTHORISED REVIEW:</span>
                   <span>{efirData.policeVerification}</span>
                 </div>
                 <p className="border-t-2 border-line pt-2 text-ink-soft leading-relaxed">
+                  Police filing status: <strong className="text-ink">{efirData.policeFilingStatus ?? 'NOT_FILED_WITH_POLICE'}</strong>. Use the relevant State/UT police process to lodge a complaint; electronic information must meet the required signature process before it is taken on record.
+                </p>
+                <p className="border-t-2 border-line pt-2 text-ink-soft leading-relaxed">
                   {efirData.narrative}
                 </p>
-                <div className="text-[11px] text-ink-soft">Submitted {new Date(efirData.createdAt).toLocaleString()} · immutable evidence receipt will appear after officer review.</div>
+                <div className="text-[11px] text-ink-soft">Saved {new Date(efirData.createdAt).toLocaleString()} · any integrity anchor belongs to this Prahari draft and is not a police acknowledgement.</div>
               </div>
             ) : (
               <form
@@ -679,7 +680,7 @@ export default function CitizenPage() {
                 onSubmit={(event) => { event.preventDefault(); handleGenerateEfir(); }}
               >
                 <p className="rounded border border-warning/40 bg-warning/10 p-2 text-ink-soft leading-relaxed">
-                  Include facts you personally know. Do not include passwords, bank PINs, or unnecessary identity numbers.
+                  Include facts you personally know. Do not include passwords, bank PINs, or unnecessary identity numbers. This saves a Prahari draft for authorised review; it does not lodge an FIR with police.
                 </p>
                 <div className="grid grid-cols-2 gap-3">
                   <label className="space-y-1"><span className="font-bold">Incident category</span>
@@ -707,8 +708,8 @@ export default function CitizenPage() {
                 </div>
                 <label className="block space-y-1"><span className="font-bold">Property / items (one per line)</span><textarea rows={2} value={efirForm.stolenItems} onChange={(e) => setEfirForm({ ...efirForm, stolenItems: e.target.value })} className="w-full rounded border-2 border-line bg-surface-2 p-2" /></label>
                 <label className="block space-y-1"><span className="font-bold">Evidence reference</span><input value={efirForm.evidenceReference} onChange={(e) => setEfirForm({ ...efirForm, evidenceReference: e.target.value })} placeholder="Photo ID, CCTV request, document reference (no uploads yet)" className="w-full rounded border-2 border-line bg-surface-2 p-2" /></label>
-                <label className="flex gap-2 items-start text-ink-soft"><input required type="checkbox" checked={efirForm.declarationAccepted} onChange={(e) => setEfirForm({ ...efirForm, declarationAccepted: e.target.checked })} className="mt-0.5" /><span>I confirm this information is true to the best of my knowledge and consent to police review.</span></label>
-                <button type="submit" className="w-full py-2.5 bg-accent hover:bg-accent-strong text-white font-bold text-xs rounded transition cursor-pointer font-mono">SUBMIT E-FIR FOR POLICE REVIEW</button>
+                <label className="flex gap-2 items-start text-ink-soft"><input required type="checkbox" checked={efirForm.declarationAccepted} onChange={(e) => setEfirForm({ ...efirForm, declarationAccepted: e.target.checked })} className="mt-0.5" /><span>I confirm these facts are true to the best of my knowledge and understand this is not an FIR filing or police acknowledgement.</span></label>
+                <button type="submit" className="w-full py-2.5 bg-accent hover:bg-accent-strong text-white font-bold text-xs rounded transition cursor-pointer font-mono">SAVE DRAFT FOR AUTHORISED REVIEW</button>
               </form>
             )}
 
@@ -716,221 +717,34 @@ export default function CitizenPage() {
               onClick={() => setActiveModal('none')}
               className="w-full py-2.5 bg-accent hover:bg-accent-strong text-white font-bold text-xs rounded transition cursor-pointer font-mono"
             >
-              CLOSE RECEIPT
+              CLOSE DRAFT
             </button>}
           </div>
         </div>
       )}
 
-      {/* MODAL 2: AI Clothing Profile */}
       {activeModal === 'attire' && (
-        <div className="fixed inset-0 z-50 bg-surface-2/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-nb border-2 border-line bg-surface p-6 shadow-nb relative text-ink space-y-4">
-            <button
-              onClick={() => setActiveModal('none')}
-              className="absolute top-4 right-4 text-ink-soft hover:text-ink p-1 bg-surface-2 rounded cursor-pointer border-2 border-line"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <div className="flex items-center gap-3 border-b-2 border-line pb-3">
-              <div className="p-2.5 bg-accent text-accent-ink rounded">
-                <Shirt className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="font-serif font-bold text-lg text-ink">Visual Attire & Description Record</h3>
-                <p className="text-xs text-ink-soft font-mono">Form V-09 • Search & Rescue Identification</p>
-              </div>
-            </div>
-
-            {attireSaved ? (
-              <div className="py-8 text-center text-success font-bold text-xs flex items-center justify-center gap-2 font-mono">
-                <CheckCircle2 className="w-5 h-5" /> ATTIRE RECORD SAVED TO DISTRICT RECORD!
-              </div>
-            ) : (
-              <form onSubmit={handleSaveAttire} className="space-y-3 text-xs">
-                {attireError && <p role="alert" className="rounded border border-danger/50 bg-danger/10 p-3 text-xs text-ink">{attireError}</p>}
-                <div>
-                  <label className="block text-ink-soft mb-1 font-mono font-bold">TOP WEAR (JACKET/SHIRT)</label>
-                  <input
-                    type="text"
-                    value={attireForm.top}
-                    onChange={(e) => setAttireForm({ ...attireForm, top: e.target.value })}
-                    className="w-full bg-surface-2 border-2 border-line rounded p-2.5 text-ink focus:outline-none focus:border-line"
-                  />
-                </div>
-                <div>
-                  <label className="block text-ink-soft mb-1 font-mono font-bold">BOTTOM WEAR (PANTS/JEANS)</label>
-                  <input
-                    type="text"
-                    value={attireForm.bottom}
-                    onChange={(e) => setAttireForm({ ...attireForm, bottom: e.target.value })}
-                    className="w-full bg-surface-2 border-2 border-line rounded p-2.5 text-ink focus:outline-none focus:border-line"
-                  />
-                </div>
-                <div>
-                  <label className="block text-ink-soft mb-1 font-mono font-bold">FOOTWEAR & ACCESSORIES</label>
-                  <input
-                    type="text"
-                    value={attireForm.footwear}
-                    onChange={(e) => setAttireForm({ ...attireForm, footwear: e.target.value })}
-                    placeholder="Footwear"
-                    className="w-full mb-2 bg-surface-2 border-2 border-line rounded p-2.5 text-ink focus:outline-none focus:border-line"
-                  />
-                  <input
-                    type="text"
-                    value={attireForm.accessories}
-                    onChange={(e) => setAttireForm({ ...attireForm, accessories: e.target.value })}
-                    className="w-full bg-surface-2 border-2 border-line rounded p-2.5 text-ink focus:outline-none focus:border-line"
-                  />
-                </div>
-
-
-                <button
-                  type="submit"
-                  className="w-full py-2.5 bg-accent hover:bg-accent-strong text-white font-bold rounded transition cursor-pointer font-mono mt-2"
-                >
-                  SAVE ATTIRE RECORD TO PERMIT TICKET
-                </button>
-              </form>
-            )}
-          </div>
-        </div>
+        <EmergencyIdentificationProfile
+          touristId={touristId}
+          profile={tourist?.clothingProfile}
+          onClose={() => setActiveModal('none')}
+          onSaved={(profile) => setTourist((current: any) => current ? { ...current, clothingProfile: profile } : current)}
+        />
       )}
 
-      {/* MODAL 3: Sarvam AI Multilingual Voice (saarika:v2.5) */}
       {activeModal === 'voice' && (
-        <div className="fixed inset-0 z-50 bg-surface-2/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-nb border-2 border-line bg-surface p-6 shadow-nb relative text-ink space-y-4">
-            <button
-              onClick={() => setActiveModal('none')}
-              className="absolute top-4 right-4 text-ink-soft hover:text-ink p-1 bg-surface-2 rounded cursor-pointer border-2 border-line"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <div className="flex items-center gap-3 border-b-2 border-line pb-3">
-              <div className="p-2.5 bg-[#FF7722] text-white rounded shadow-sm animate-pulse">
-                <Mic className="w-6 h-6" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="font-serif font-bold text-lg text-ink">Sarvam AI Multilingual Voice SOS</h3>
-                  <span className="text-[10px] font-mono font-bold bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 px-1.5 py-0.5 rounded">
-                    saarika:v2.5
-                  </span>
-                </div>
-                <p className="text-xs text-ink-soft font-mono">Bhashini AI Speech Recognition System • 10+ Indian Languages</p>
-              </div>
-            </div>
-
-            <div className="space-y-3 text-xs">
-              <div>
-                <label className="block text-ink-soft mb-1.5 font-mono font-bold">SELECT REGIONAL LANGUAGE</label>
-                <div className="grid grid-cols-3 gap-1.5 mb-2">
-                  {['Hindi (हिंदी)', 'Marathi (मराठी)', 'Bengali (বাংলা)', 'Tamil (தமிழ்)', 'Telugu (తెలుగు)', 'English'].map((lang) => (
-                    <button
-                      key={lang}
-                      type="button"
-                      onClick={() => setSelectedLang(lang)}
-                      className={`px-2 py-1.5 rounded text-[11px] font-mono font-bold transition border cursor-pointer ${
-                        selectedLang === lang
-                          ? 'bg-accent text-white border-accent'
-                          : 'bg-surface-2 text-ink-soft border-line hover:border-accent'
-                      }`}
-                    >
-                      {lang.split(' ')[0]}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="bg-surface-2 p-5 rounded-nb border-2 border-line text-center space-y-4 relative overflow-hidden">
-                {/* Animated Equalizer Wave visualizer when recording */}
-                {listening && (
-                  <div className="flex items-center justify-center gap-1.5 py-1">
-                    <span className="w-1.5 h-6 bg-accent rounded-full animate-bounce [animation-delay:-0.4s]" />
-                    <span className="w-1.5 h-10 bg-[#FF7722] rounded-full animate-bounce [animation-delay:-0.2s]" />
-                    <span className="w-1.5 h-8 bg-emerald-500 rounded-full animate-bounce" />
-                    <span className="w-1.5 h-12 bg-[#FF7722] rounded-full animate-bounce [animation-delay:0.2s]" />
-                    <span className="w-1.5 h-6 bg-accent rounded-full animate-bounce [animation-delay:0.4s]" />
-                  </div>
-                )}
-
-                <button
-                  onClick={listening ? handleStopVoice : handleStartVoice}
-                  className={`w-20 h-20 rounded-full mx-auto flex items-center justify-center transition-all duration-300 border-2 cursor-pointer shadow-lg ${
-                    listening
-                      ? 'bg-[#FF7722] text-white border-amber-600 ring-4 ring-amber-500/30 scale-105 animate-pulse'
-                      : 'bg-accent text-white hover:bg-accent-strong border-slate-900'
-                  }`}
-                >
-                  <Mic className="w-8 h-8" />
-                </button>
-
-                <div>
-                  <p className="text-xs text-ink font-bold font-mono">
-                    {listening ? '🔴 RECORDING IN PROGRESS — TAP TO FINISH' : (transcribedText ? '✨ SARVAM AI TRANSCRIPTION SUCCESSFUL' : (voiceText || 'TAP MICROPHONE TO DICTATE DISTRESS MESSAGE'))}
-                  </p>
-                  <p className="text-[10px] text-ink-soft font-mono mt-0.5">
-                    Engine: <span className="font-bold text-accent">Sarvam AI saarika:v2.5</span> ({LANG_MAP[selectedLang] || 'hi-IN'})
-                  </p>
-                </div>
-
-                {transcribedText && (
-                  <div className="bg-emerald-500/10 dark:bg-emerald-950/40 p-4 rounded-nb border-2 border-emerald-500/40 text-left space-y-2.5 shadow-md">
-                    <div className="flex items-center justify-between border-b border-emerald-500/30 pb-2">
-                      <span className="text-[10px] font-mono font-black text-emerald-800 dark:text-emerald-300 uppercase tracking-wider flex items-center gap-1.5">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                        SARVAM AI TRANSCRIBED TEXT ({LANG_MAP[selectedLang] || 'hi-IN'})
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if ('speechSynthesis' in window) {
-                            const u = new SpeechSynthesisUtterance(transcribedText);
-                            u.lang = LANG_MAP[selectedLang] || 'hi-IN';
-                            window.speechSynthesis.speak(u);
-                          }
-                        }}
-                        className="text-[10px] font-mono font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-500/20 px-2 py-0.5 rounded hover:bg-emerald-500/30 transition flex items-center gap-1 cursor-pointer"
-                      >
-                        🔊 Listen TTS
-                      </button>
-                    </div>
-
-                    <div className="p-3 bg-surface rounded border border-emerald-500/30 text-ink">
-                      <p className="text-sm font-semibold text-ink leading-relaxed font-sans select-all">
-                        &quot;{transcribedText}&quot;
-                      </p>
-                    </div>
-
-                    <div className="pt-1 flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEfirData(null);
-                          setEfirForm((current) => ({ ...current, narrative: transcribedText }));
-                          setActiveModal('efir');
-                        }}
-                        className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-mono text-xs font-bold rounded shadow transition flex items-center justify-center gap-1.5 cursor-pointer"
-                      >
-                        📋 Attach to E-FIR Complaint Statement →
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {voiceError && (
-                  <div className="flex items-center gap-1.5 text-xs text-red-600 font-mono justify-center bg-red-500/10 p-2.5 rounded border border-red-500/30">
-                    <AlertTriangle className="w-4 h-4 shrink-0" />
-                    <span>{voiceError}</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
+        <TravellerVoiceAssistant
+          touristId={touristId}
+          coords={coords}
+          preferredLanguage={tourist?.preferences?.language}
+          onClose={() => setActiveModal('none')}
+          onVoiceSos={(incident) => setActiveIncident(incident)}
+          onUseInReport={(text) => {
+            setEfirData(null);
+            setEfirForm((current) => ({ ...current, narrative: text }));
+            setActiveModal('efir');
+          }}
+        />
       )}
 
     </div>

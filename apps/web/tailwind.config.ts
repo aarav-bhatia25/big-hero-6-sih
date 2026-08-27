@@ -6,7 +6,7 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // Semantic, token-backed palette — flips automatically in `.dark`.
+        // Semantic, token-backed palette shared by the public and operations UI.
         bg: "var(--nb-bg)",
         surface: "var(--nb-surface)",
         "surface-2": "var(--nb-surface-2)",
@@ -19,7 +19,7 @@ const config: Config = {
           ink: "var(--nb-accent-ink)",
           soft: "var(--nb-accent-soft)",
         },
-        // Flat status colours (neobrutalist blocks; readable on both themes).
+        // Status colours are reserved for operational meaning.
         success: "#15a34a",
         danger: "#e11d48",
         warning: "#f59e0b",
@@ -27,15 +27,16 @@ const config: Config = {
         canvas: "var(--nb-bg)",
         brand: { 50: "#eef6ff", 500: "var(--nb-accent)", 600: "var(--nb-accent-strong)" },
       },
-      borderRadius: { nb: "6px" },
+      borderRadius: { nb: "var(--nb-radius)" },
       boxShadow: {
         nb: "var(--nb-shadow)",
-        "nb-sm": "2px 2px 0 var(--nb-border)",
-        "nb-lg": "6px 6px 0 var(--nb-border)",
-        "nb-accent": "4px 4px 0 var(--nb-accent)",
+        "nb-sm": "0 1px 2px rgba(28, 27, 24, 0.04)",
+        "nb-lg": "0 6px 18px rgba(28, 27, 24, 0.06)",
+        "nb-accent": "0 0 0 3px rgba(36, 35, 32, 0.08)",
       },
       fontFamily: {
         sans: ["var(--font-sans)", "ui-sans-serif", "system-ui", "sans-serif"],
+        display: ["var(--font-display)", "Georgia", "serif"],
       },
     },
   },

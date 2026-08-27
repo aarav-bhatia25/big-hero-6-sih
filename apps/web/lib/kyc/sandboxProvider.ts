@@ -144,9 +144,7 @@ export class SandboxKycProvider implements KycProvider {
 
     const cleanOtp = String(otp || '').replace(/\D/g, '');
     const expected = session.challengeHash;
-    const isOtpValid =
-      (this.isSandbox && cleanOtp.length === 6) ||
-      (Boolean(expected) && safeEqual(hashChallenge(cleanOtp, sessionId), expected));
+    const isOtpValid = Boolean(expected) && safeEqual(hashChallenge(cleanOtp, sessionId), expected);
 
     if (!isOtpValid) {
       const attempts = await incrementKycAttempts(sessionId);

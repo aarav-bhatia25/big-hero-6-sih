@@ -4,6 +4,7 @@ import React, { useState, useMemo } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polygon, Circle, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { offlineTileConfiguration, readOfflineMapPack, type OfflineMapPack } from '@/lib/offlineMap';
 
 // Custom Map Markers (safely instantiated on client only)
 const getTouristIcon = () =>
@@ -35,6 +36,19 @@ const getResponderIcon = () =>
         iconAnchor: [13, 13],
       })
     : (null as any);
+
+const getOfflinePlaceIcon = (category: string) => {
+  const labels: Record<string, string> = { tourist: '★', hospital: '+', police: 'P', fire_station: 'F', safety_zone: '!' };
+  const colors: Record<string, string> = { tourist: '#7c3aed', hospital: '#dc2626', police: '#2563eb', fire_station: '#ea580c', safety_zone: '#059669' };
+  return typeof window !== 'undefined'
+    ? new L.DivIcon({
+        className: 'custom-leaflet-icon',
+        html: `<div style="background-color:${colors[category] || '#475569'};width:24px;height:24px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:800">${labels[category] || '•'}</div>`,
+        iconSize: [24, 24],
+        iconAnchor: [12, 12],
+      })
+    : (null as any);
+};
 
 interface ClientMapInnerProps {
   touristPos?: { lat: number; lng: number } | null;
@@ -74,7 +88,7 @@ function FitToData({ points }: { points: Array<[number, number]> }) {
       return;
     }
     map.fitBounds(L.latLngBounds(points), { padding: [40, 40], maxZoom: 15 });
-  }, [key, map]);
+  }, [key, map, points]);
 
   return null;
 }
@@ -104,10 +118,19 @@ export default function ClientMapInner({
   responders = [],
 }: ClientMapInnerProps) {
   const [showHeatmap, setShowHeatmap] = useState(true);
+  const [offlinePack, setOfflinePack] = useState<OfflineMapPack | null>(null);
 
   const touristIcon = useMemo(() => getTouristIcon(), []);
   const incidentIcon = useMemo(() => getIncidentIcon(), []);
   const responderIcon = useMemo(() => getResponderIcon(), []);
+  const mapTiles = offlineTileConfiguration();
+
+  React.useEffect(() => {
+    const refreshOfflinePack = () => setOfflinePack(readOfflineMapPack());
+    refreshOfflinePack();
+    window.addEventListener('prahari:offline-map-pack-updated', refreshOfflinePack);
+    return () => window.removeEventListener('prahari:offline-map-pack-updated', refreshOfflinePack);
+  }, []);
 
   const activeGeofences = geofences;
 
@@ -122,19 +145,53 @@ export default function ClientMapInner({
     ...responders
       .filter((r) => typeof r.lat === 'number' && typeof r.lng === 'number')
       .map((r) => [r.lat, r.lng] as [number, number]),
+    ...(offlinePack?.places
+      .filter((place) => typeof place.lat === 'number' && typeof place.lng === 'number')
+      .map((place) => [place.lat, place.lng] as [number, number]) ?? []),
     ...activeGeofences.flatMap((g) => normalizePolygonCoords(g)),
-  ], [touristPos, liveTourists, incidents, responders, activeGeofences]);
+  ], [touristPos, liveTourists, incidents, responders, offlinePack, activeGeofences]);
 
   const riskHotspots = useMemo(() => {
-    const centerLat = points[0]?.[0] ?? 30.3165;
-    const centerLng = points[0]?.[1] ?? 78.0322;
-    return [
-      { id: 'hs-1', name: 'Pickpocketing & Theft Hotspot', category: 'Pickpocketing / Theft', lat: centerLat + 0.006, lng: centerLng + 0.004, radius: 450, color: '#f59e0b', intensity: 'High' },
-      { id: 'hs-2', name: 'Accident-Prone Mountain Curve', category: 'Accidents / Terrain Hazard', lat: centerLat - 0.005, lng: centerLng - 0.007, radius: 600, color: '#ef4444', intensity: 'Critical' },
-      { id: 'hs-3', name: 'Harassment & Safety Advisory Zone', category: 'Harassment Advisory', lat: centerLat + 0.010, lng: centerLng - 0.003, radius: 500, color: '#a855f7', intensity: 'Moderate' },
-      { id: 'hs-4', name: 'Missing-Person Historical Search Sector', category: 'Missing-Person Reports', lat: centerLat - 0.008, lng: centerLng + 0.006, radius: 700, color: '#ec4899', intensity: 'High' },
-    ];
-  }, [points]);
+    const severityStyle = (severity: string) => {
+      const normalized = severity.toLowerCase();
+      if (normalized === 'critical') return { color: '#ef4444', radius: 850, intensity: 'Critical' };
+      if (normalized === 'high') return { color: '#f97316', radius: 650, intensity: 'High' };
+      if (normalized === 'medium') return { color: '#f59e0b', radius: 450, intensity: 'Medium' };
+      return { color: '#eab308', radius: 300, intensity: 'Low' };
+    };
+
+    const incidentSources = incidents
+      .filter((incident) => typeof incident.lat === 'number' && typeof incident.lng === 'number')
+      .map((incident) => ({
+        id: `incident-${incident.id}`,
+        name: incident.incidentId,
+        category: `Recorded incident: ${incident.type || 'Safety report'}`,
+        lat: incident.lat,
+        lng: incident.lng,
+        ...severityStyle(String(incident.severity || 'high')),
+      }));
+
+    const geofenceSources = activeGeofences
+      .map((geofence) => {
+        const coordinates = normalizePolygonCoords(geofence);
+        if (coordinates.length < 3) return null;
+        const [lat, lng] = coordinates.reduce(
+          (sum, coordinate) => [sum[0] + coordinate[0], sum[1] + coordinate[1]],
+          [0, 0],
+        ).map((sum) => sum / coordinates.length) as [number, number];
+        return {
+          id: `geofence-${geofence.id}`,
+          name: geofence.name,
+          category: 'Published risk geofence',
+          lat,
+          lng,
+          ...severityStyle(String(geofence.severity || 'high')),
+        };
+      })
+      .filter((source): source is NonNullable<typeof source> => Boolean(source));
+
+    return [...incidentSources, ...geofenceSources];
+  }, [activeGeofences, incidents]);
 
   if (points.length === 0) {
     return (
@@ -160,11 +217,11 @@ export default function ClientMapInner({
         <FitToData points={points} />
 
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution={mapTiles.template ? mapTiles.attribution : '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'}
+          url={mapTiles.template || "https://tile.openstreetmap.org/{z}/{x}/{y}.png"}
         />
 
-        {/* Dynamic Risk Heatmap Layers */}
+        {/* Risk overlay is derived only from current incident and geofence records. */}
         {showHeatmap && riskHotspots.map((hs) => (
           <Circle
             key={hs.id}
@@ -180,7 +237,7 @@ export default function ClientMapInner({
             <Popup>
               <div className="text-slate-900 font-sans p-1">
                 <strong className="block text-sm font-bold" style={{ color: hs.color }}>
-                  HEATMAP: {hs.name}
+                  RISK OVERLAY: {hs.name}
                 </strong>
                 <span className="block text-xs font-semibold mt-0.5">Category: {hs.category}</span>
                 <span className="text-[11px] text-slate-600">Risk Intensity: {hs.intensity}</span>
@@ -271,6 +328,20 @@ export default function ClientMapInner({
             </Popup>
           </Marker>
         ))}
+
+        {/* Places stored by the traveller's selected offline safety pack. */}
+        {offlinePack?.places.map((place) => (
+          <Marker key={`offline-${place.id}`} position={[place.lat, place.lng]} icon={getOfflinePlaceIcon(place.category)}>
+            <Popup>
+              <div className="p-1 font-sans text-slate-900">
+                <strong className="block text-sm font-bold">{place.name}</strong>
+                <span className="block text-xs font-semibold capitalize">{place.category.replace('_', ' ')}</span>
+                {place.address && <span className="mt-1 block text-xs text-slate-600">{place.address}</span>}
+                {place.phone && <a href={`tel:${place.phone}`} className="mt-1 block text-xs font-semibold text-blue-700 underline">Call {place.phone}</a>}
+              </div>
+            </Popup>
+          </Marker>
+        ))}
       </MapContainer>
 
       <div className="absolute bottom-3 left-3 z-[1000] flex flex-wrap items-center gap-3 rounded-lg border border-slate-700/80 bg-slate-900/90 px-3 py-2 text-xs text-slate-200 backdrop-blur-md">
@@ -278,6 +349,7 @@ export default function ClientMapInner({
         {incidents.length > 0 && <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-red-500" />Incident</span>}
         {activeGeofences.length > 0 && <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-amber-500" />Geofence</span>}
         {responders.length > 0 && <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-blue-500" />Responder</span>}
+        {offlinePack && <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-violet-500" />Offline pack · {offlinePack.places.length} places</span>}
         <button
           type="button"
           onClick={() => setShowHeatmap((prev) => !prev)}
@@ -287,8 +359,8 @@ export default function ClientMapInner({
               : 'bg-slate-800 text-slate-400 border border-slate-700'
           }`}
         >
-          <span className="h-2 w-2 rounded-full bg-purple-400 animate-pulse" />
-          Heatmap: {showHeatmap ? 'ON' : 'OFF'}
+          <span className="h-2 w-2 rounded-full bg-purple-400" />
+          Risk overlay: {showHeatmap ? 'ON' : 'OFF'}
         </button>
       </div>
     </div>

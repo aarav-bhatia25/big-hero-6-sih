@@ -10,6 +10,8 @@ export interface ResponderUnit {
   lng: number;
 }
 
+export const MAX_AUTOMATIC_DISPATCH_DISTANCE_KM = 15;
+
 export function findNearestResponder(
   incidentLat: number,
   incidentLng: number,
@@ -31,7 +33,8 @@ export function findNearestResponder(
     }
   }
 
-  const estimatedMinutes = Math.max(1, Math.round((minDistanceKm / 40) * 60)); // Assuming 40km/h travel speed
+  if (!nearest || minDistanceKm > MAX_AUTOMATIC_DISPATCH_DISTANCE_KM) return null;
+  const estimatedMinutes = Math.max(1, Math.round((minDistanceKm / 40) * 60)); // Planning estimate only; dispatch must confirm.
 
   return {
     responder: nearest,

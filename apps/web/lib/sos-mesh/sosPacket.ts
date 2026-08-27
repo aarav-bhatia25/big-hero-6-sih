@@ -1,5 +1,5 @@
 /**
- * Offline SOS Mesh — Versioned Emergency SOS Packet
+ * Versioned offline emergency packet.
  * 
  * Inspired by BitChat's minimal wire protocol principles.
  * Contains only non-PII, opaque routing metadata and core coordinates.
@@ -12,21 +12,26 @@ export interface SOSPacket {
   touristId: string; // Opaque tourist ID (e.g. TOUR-7890 or hash)
   type: 'SOS' | 'PANIC' | 'MEDICAL';
   severity: 'CRITICAL' | 'HIGH';
-  latitude: number;
-  longitude: number;
+  latitude: number | null;
+  longitude: number | null;
   accuracy: number;
   timestamp: number; // UTC epoch millis
   expiresAt: number; // UTC epoch millis (packet expiration)
   ttl: number; // Time To Live (max remaining hops)
   hopCount: number; // Hops taken so far
   originDeviceId: string; // Ephemeral/opaque device ID
-  lastKnownTransport: 'INTERNET' | 'SMS' | 'BLE_RELAY' | 'LOCAL_QUEUE';
+  lastKnownTransport: 'INTERNET' | 'BLE_RELAY' | 'LOCAL_QUEUE';
   relayPath: string[]; // List of relay node IDs e.g. ["DEV-ORIGIN", "RELAY-B82F"]
   signature?: string; // Optional checksum / signature
   packetCategory?: 'SOS_ALERT' | 'CHAT_MESSAGE';
   chatText?: string;
   senderRole?: 'tourist' | 'authority';
   senderName?: string;
+  /** ISO-style language code of the text delivered to the recipient. */
+  chatLanguage?: string;
+  /** Officer-authored original retained alongside an AI translation. */
+  originalText?: string;
+  originalLanguage?: string;
 }
 
 export const CURRENT_PACKET_VERSION = 1;
@@ -82,6 +87,9 @@ export function createChatPacket(params: {
   senderRole: 'tourist' | 'authority';
   senderName: string;
   text: string;
+  language?: string;
+  originalText?: string;
+  originalLanguage?: string;
   latitude?: number;
   longitude?: number;
   originDeviceId?: string;
@@ -97,8 +105,8 @@ export function createChatPacket(params: {
     touristId: params.touristId,
     type: 'PANIC',
     severity: 'HIGH',
-    latitude: params.latitude ?? 19.0728,
-    longitude: params.longitude ?? 72.8997,
+    latitude: params.latitude ?? null,
+    longitude: params.longitude ?? null,
     accuracy: 10,
     timestamp: now,
     expiresAt: now + DEFAULT_PACKET_LIFESPAN_MS,
@@ -111,6 +119,9 @@ export function createChatPacket(params: {
     chatText: params.text,
     senderRole: params.senderRole,
     senderName: params.senderName,
+    chatLanguage: params.language,
+    originalText: params.originalText,
+    originalLanguage: params.originalLanguage,
   };
 }
 
@@ -119,15 +130,21 @@ export function createChatPacket(params: {
  */
 export function isValidSOSPacket(packet: any): packet is SOSPacket {
   if (!packet || typeof packet !== 'object') return false;
-  if (typeof packet.version !== 'number' || packet.version <= 0) return false;
-  if (typeof packet.packetId !== 'string' || !packet.packetId) return false;
-  if (typeof packet.incidentId !== 'string' || !packet.incidentId) return false;
-  if (typeof packet.touristId !== 'string' || !packet.touristId) return false;
-  if (typeof packet.latitude !== 'number' || !Number.isFinite(packet.latitude)) return false;
-  if (typeof packet.longitude !== 'number' || !Number.isFinite(packet.longitude)) return false;
-  if (typeof packet.timestamp !== 'number' || packet.timestamp <= 0) return false;
-  if (typeof packet.ttl !== 'number' || packet.ttl < 0) return false;
-  if (typeof packet.hopCount !== 'number' || packet.hopCount < 0) return false;
+  if (packet.version !== CURRENT_PACKET_VERSION) return false;
+  if (typeof packet.packetId !== 'string' || !packet.packetId || packet.packetId.length > 120) return false;
+  if (typeof packet.incidentId !== 'string' || !packet.incidentId || packet.incidentId.length > 120) return false;
+  if (typeof packet.touristId !== 'string' || !packet.touristId || packet.touristId.length > 120) return false;
+  if (!['SOS', 'PANIC', 'MEDICAL'].includes(packet.type)) return false;
+  if (!['CRITICAL', 'HIGH'].includes(packet.severity)) return false;
+  const hasCoordinates = typeof packet.latitude === 'number' && Number.isFinite(packet.latitude) && packet.latitude >= -90 && packet.latitude <= 90 &&
+    typeof packet.longitude === 'number' && Number.isFinite(packet.longitude) && packet.longitude >= -180 && packet.longitude <= 180;
+  const hasNoCoordinates = packet.latitude == null && packet.longitude == null;
+  if (packet.packetCategory === 'CHAT_MESSAGE' ? !(hasCoordinates || hasNoCoordinates) : !hasCoordinates) return false;
+  if (typeof packet.timestamp !== 'number' || !Number.isFinite(packet.timestamp) || packet.timestamp <= 0) return false;
+  if (typeof packet.expiresAt !== 'number' || !Number.isFinite(packet.expiresAt) || packet.expiresAt < packet.timestamp) return false;
+  if (typeof packet.ttl !== 'number' || !Number.isInteger(packet.ttl) || packet.ttl < 0 || packet.ttl > DEFAULT_PACKET_TTL) return false;
+  if (typeof packet.hopCount !== 'number' || !Number.isInteger(packet.hopCount) || packet.hopCount < 0 || packet.hopCount > DEFAULT_PACKET_TTL) return false;
+  if (!Array.isArray(packet.relayPath) || packet.relayPath.length > DEFAULT_PACKET_TTL + 1 || packet.relayPath.some((id: unknown) => typeof id !== 'string' || !id || id.length > 120)) return false;
   return true;
 }
 
@@ -141,12 +158,12 @@ export function isPacketExpired(packet: SOSPacket, now: number = Date.now()): bo
 }
 
 /**
- * Prepares a packet for forwarding over a mesh hop:
+ * Prepares a packet for forwarding over a relay hop:
  * - Increments hopCount
  * - Decrements TTL
  * - Appends relay Node ID to relayPath if available
  */
-export function incrementPacketHop(packet: SOSPacket, relayDeviceId: string, transport: 'BLE_RELAY' | 'SMS' | 'INTERNET'): SOSPacket {
+export function incrementPacketHop(packet: SOSPacket, relayDeviceId: string, transport: 'BLE_RELAY' | 'INTERNET'): SOSPacket {
   const updatedPath = packet.relayPath ? [...packet.relayPath] : [packet.originDeviceId];
   if (!updatedPath.includes(relayDeviceId)) {
     updatedPath.push(relayDeviceId);
@@ -183,7 +200,7 @@ export function deserializeSOSPacket(raw: string): SOSPacket | null {
 }
 
 /**
- * Gets or generates an ephemeral local device ID for mesh relay routing.
+ * Gets or generates an ephemeral local device ID for relay provenance.
  */
 export function getOrCreateDeviceId(): string {
   if (typeof window === 'undefined') return 'NODE-SERVER';

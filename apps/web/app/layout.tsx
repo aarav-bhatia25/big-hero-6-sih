@@ -1,5 +1,5 @@
-import type { Metadata } from "next";
-import { Space_Grotesk } from "next/font/google";
+import type { Metadata, Viewport } from "next";
+import { Playfair_Display, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import PwaRegister from "@/components/PwaRegister";
 
@@ -9,17 +9,29 @@ const sans = Space_Grotesk({
   variable: "--font-sans",
 });
 
+const serif = Playfair_Display({
+  subsets: ["latin"],
+  weight: ["500", "600"],
+  style: ["italic", "normal"],
+  variable: "--font-serif",
+});
+
 export const metadata: Metadata = {
   title: "Prahari | Tourist Safety Command",
   description: "AI-Powered Tourist Safety, Digital Identity & Offline Emergency SOS Mesh",
   manifest: "/manifest.json",
-  themeColor: "#090d16",
-  viewport: "width=device-width, initial-scale=1, maximum-scale=1",
+};
+
+export const viewport: Viewport = {
+  themeColor: "#fbfbf8",
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={sans.variable}>
+    <html lang="en" className={`${sans.variable} ${serif.variable}`}>
       <body>
         <PwaRegister />
         {children}

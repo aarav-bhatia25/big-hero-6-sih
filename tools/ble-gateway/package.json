@@ -1,0 +1,13 @@
+{
+  "name": "@prahari/ble-relay-gateway",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "node index.mjs",
+    "test": "node --test gatewayCore.test.mjs"
+  },
+  "dependencies": {
+    "@abandonware/bleno": "^0.6.0"
+  }
+}

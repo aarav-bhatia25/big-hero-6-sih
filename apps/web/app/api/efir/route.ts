@@ -7,6 +7,13 @@ import { operationalIncidents } from '@/lib/operationalData';
 
 export const dynamic = 'force-dynamic';
 
+const PRAHARI_DRAFT_LEGAL_STATUS = {
+  primaryReference: 'BNSS 2023, section 173 (information in cognizable cases)',
+  filingStatus: 'NOT_FILED_WITH_POLICE',
+  signatureRequirement: 'Electronic information relating to a cognizable offence must be signed by the informant within three days before it is taken on record.',
+  stateFormat: 'The receiving State/UT police authority determines the applicable CCTNS/IIF-I or other prescribed format and whether FIR registration is appropriate.',
+};
+
 export async function POST(request: NextRequest) {
   const auth = await requireAuth(request, ['tourist', 'authority', 'admin', 'responder']);
   if (auth.errorResponse) return auth.errorResponse;
@@ -17,7 +24,7 @@ export async function POST(request: NextRequest) {
     const {
       incidentId,
       passportAadhaar,
-      incidentType = 'E-FIR report',
+      incidentType = 'Incident information draft',
       location,
       clothingProfile,
       emergencyContact,
@@ -25,6 +32,7 @@ export async function POST(request: NextRequest) {
       narrative,
       reportLanguage = 'English',
       incidentCategory,
+      reportType = 'INCIDENT_INFORMATION_DRAFT',
       suspectDescription = '',
       witnesses = [],
       stolenItems = [],
@@ -42,7 +50,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (!canAccessTouristData(session, touristId)) {
-      return NextResponse.json({ success: false, error: 'You can only file an E-FIR for your own identity.' }, { status: 403 });
+      return NextResponse.json({ success: false, error: 'You can only prepare a report draft for your own identity.' }, { status: 403 });
     }
     if (!location || !Number.isFinite(location.lat) || !Number.isFinite(location.lng)) {
       return NextResponse.json({ success: false, error: 'A valid incident location is required.' }, { status: 400 });
@@ -58,6 +66,9 @@ export async function POST(request: NextRequest) {
     if (!tourist) {
       return NextResponse.json({ success: false, error: 'Tourist record not found.' }, { status: 404 });
     }
+    if (tourist.identityStatus !== 'verified') {
+      return NextResponse.json({ success: false, error: 'A verified tourist record is required before preparing a police-ready draft.' }, { status: 409 });
+    }
     const storedContact = tourist?.emergencyContacts?.[0];
     const contact = emergencyContact
       ? String(emergencyContact).slice(0, 200)
@@ -72,7 +83,7 @@ export async function POST(request: NextRequest) {
       ? evidence.slice(0, 10).map((item: any) => ({ type: String(item?.type ?? 'other').slice(0, 40), reference: String(item?.reference ?? '').slice(0, 500), description: String(item?.description ?? '').slice(0, 1000) }))
       : [];
 
-    const efirId = `EFIR-${new Date().getUTCFullYear()}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+    const efirId = `PDR-${new Date().getUTCFullYear()}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
     const draftEfIR = {
       efirId,
       incidentId: incidentId || `INC-${Math.floor(1000 + Math.random() * 9000)}`,
@@ -87,6 +98,7 @@ export async function POST(request: NextRequest) {
       occurrenceAt: occurrenceAt || null,
       reportedAt,
       reportLanguage,
+      reportType: String(reportType).slice(0, 80),
       incidentCategory: incidentCategory || incidentType,
       narrative: narrative.trim(),
       suspectDescription: String(suspectDescription).slice(0, 2000),
@@ -95,8 +107,13 @@ export async function POST(request: NextRequest) {
       injuries: String(injuries).slice(0, 2000),
       evidence: normalizedEvidence,
       declarationAccepted: true,
-      status: 'SUBMITTED_FOR_REVIEW',
-      policeVerification: 'PENDING_OFFICER_APPROVAL',
+      declarationAcceptedAt: reportedAt,
+      legalFramework: PRAHARI_DRAFT_LEGAL_STATUS,
+      policeFilingStatus: 'NOT_FILED_WITH_POLICE',
+      status: 'DRAFT_PENDING_AUTHORISED_REVIEW',
+      // Kept for existing authority-screen compatibility. This denotes a
+      // Prahari review only—not a police or CCTNS verification outcome.
+      policeVerification: 'PENDING_AUTHORISED_REVIEW',
       createdAt: reportedAt,
       auditTrail: [{ event: 'SUBMITTED', at: reportedAt, actor: session.name, actorRole: session.role }],
     };
@@ -118,15 +135,15 @@ export async function POST(request: NextRequest) {
       efirDraft: draftEfIR,
       timeline: [
         ...((existing?.timeline as any[]) ?? []),
-        { event: 'E-FIR submitted for officer review', at: reportedAt, actor: session.name },
+        { event: 'Police-ready incident draft saved for authorised review; not filed with police.', at: reportedAt, actor: session.name },
       ],
     })) {
-      return NextResponse.json({ success: false, error: 'The E-FIR could not be saved for officer review.' }, { status: 503 });
+      return NextResponse.json({ success: false, error: 'The incident information draft could not be saved for authorised review.' }, { status: 503 });
     }
 
     return NextResponse.json({
       success: true,
-      message: 'E-FIR submitted and queued for officer verification.',
+      message: 'Police-ready incident draft saved to Prahari’s authorised review queue. It has not been filed with a police authority.',
       efir: draftEfIR,
     });
   } catch (err: any) {
@@ -142,7 +159,7 @@ export async function GET(request: NextRequest) {
     const incidentId = new URL(request.url).searchParams.get('incidentId');
     if (incidentId) {
       const incident = operationalIncidents(await listIncidents(200)).find((item: any) => item.incidentId === incidentId && item.efirDraft);
-      if (!incident) return NextResponse.json({ success: false, error: 'E-FIR not found.' }, { status: 404 });
+      if (!incident) return NextResponse.json({ success: false, error: 'Incident information draft not found.' }, { status: 404 });
       return NextResponse.json({ success: true, evidence: await verifyEfirEvidence(incidentId, incident.efirDraft) });
     }
     const incidentsWithEfir = operationalIncidents(await listIncidentsWithEfir());
@@ -154,7 +171,7 @@ export async function GET(request: NextRequest) {
 }
 
 /**
- * Officer verification step for an E-FIR draft.
+ * Authorised-review step for a Prahari incident information draft.
  * Accepts: { incidentId, action: 'APPROVE' | 'REJECT', officerName?, officerBadge?, remarks? }
  */
 export async function PATCH(request: NextRequest) {
@@ -181,25 +198,26 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
-    // Find the incident with the E-FIR draft
+    // Find the incident with the Prahari draft.
     const allIncidents = operationalIncidents(await listIncidents(200));
     const incident = allIncidents.find((i: any) => i.incidentId === incidentId && i.efirDraft);
 
     if (!incident) {
       return NextResponse.json(
-        { success: false, error: `Incident ${incidentId} not found or has no E-FIR draft` },
+        { success: false, error: `Incident ${incidentId} not found or has no incident information draft` },
         { status: 404 }
       );
     }
 
     const now = new Date().toISOString();
-    const event = action === 'APPROVE' ? 'OFFICER_VERIFIED' : 'REJECTED';
+    const event = action === 'APPROVE' ? 'AUTHORISED_REVIEWED' : 'RETURNED_FOR_CORRECTION';
     const draftForAnchor = {
       ...incident.efirDraft,
-      policeVerification: action === 'APPROVE' ? 'OFFICER_VERIFIED' : 'REJECTED',
-      status: action === 'APPROVE' ? 'OFFICER_VERIFIED' : 'REJECTED',
-      verifiedAt: now,
-      verifiedBy: officerName || 'Authority Officer',
+      policeVerification: action === 'APPROVE' ? 'AUTHORISED_REVIEWED' : 'RETURNED_FOR_CORRECTION',
+      status: action === 'APPROVE' ? 'DRAFT_REVIEWED' : 'DRAFT_RETURNED_FOR_CORRECTION',
+      policeFilingStatus: incident.efirDraft.policeFilingStatus ?? 'NOT_FILED_WITH_POLICE',
+      reviewedAt: now,
+      reviewedBy: officerName || 'Authority Officer',
       officerBadge: officerBadge || null,
       remarks: remarks ? String(remarks).slice(0, 2000) : null,
       auditTrail: [
@@ -221,7 +239,7 @@ export async function PATCH(request: NextRequest) {
       efirDraft: updatedDraft,
       timeline: [
         ...(incident.timeline ?? []),
-        { event: `E-FIR ${action === 'APPROVE' ? 'verified' : 'rejected'}`, at: now, actor: officerName || 'Authority Officer', remarks: remarks || null },
+        { event: `Police-ready incident draft ${action === 'APPROVE' ? 'reviewed' : 'returned for correction'}; not filed with police.`, at: now, actor: officerName || 'Authority Officer', remarks: remarks || null },
       ],
     });
 
@@ -236,7 +254,7 @@ export async function PATCH(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: `E-FIR ${action === 'APPROVE' ? 'approved' : 'rejected'} by ${officerName || 'Authority Officer'}`,
+      message: `Police-ready draft ${action === 'APPROVE' ? 'reviewed' : 'returned for correction'} by ${officerName || 'Authority Officer'}. This is not a police filing acknowledgement.`,
       efir: updatedDraft,
       blockchain: updatedDraft.blockchainEvidence,
     });

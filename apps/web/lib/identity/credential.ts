@@ -1,6 +1,6 @@
 import { createHash, generateKeyPairSync, sign as edSign, verify as edVerify, createPrivateKey, createPublicKey } from 'node:crypto';
 import type { KeyObject } from 'node:crypto';
-import { base58, deriveDid, buildDidDocument } from './did';
+import { base58, buildDidDocument, decodeBase58, deriveDid } from './did';
 import type { KycSubject } from '../kyc/types';
 
 /** Legacy API callers receive a conservative 30-day credential. */
@@ -173,17 +173,8 @@ export function verifyCredential(vc: VerifiableCredential): { valid: boolean; re
   const hash = computeCredentialHash(vc);
   const raw = vc.proof.proofValue.replace(/^z/, '');
 
-  // base58 -> bytes
-  const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
-  let n = 0n;
-  for (const ch of raw) {
-    const idx = B58.indexOf(ch);
-    if (idx < 0) return { valid: false, reason: 'Malformed proof encoding.' };
-    n = n * 58n + BigInt(idx);
-  }
-  let hex = n.toString(16);
-  if (hex.length % 2) hex = '0' + hex;
-  const sig = Buffer.from(hex, 'hex');
+  const sig = decodeBase58(raw);
+  if (!sig) return { valid: false, reason: 'Malformed proof encoding.' };
 
   try {
     const ok = edVerify(null, Buffer.from(hash, 'utf8'), getIssuerKeys().publicKey, sig);

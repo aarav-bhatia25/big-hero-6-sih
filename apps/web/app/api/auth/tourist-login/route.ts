@@ -1,75 +1,59 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getTouristByIdOrDid, getTourist } from '@/lib/db';
+import { getTouristByIdOrDid } from '@/lib/db';
+import { verifyPassword } from '@/lib/auth/crypto';
 import { createSessionToken, setSessionCookie } from '@/lib/auth/session';
 
 export const dynamic = 'force-dynamic';
 
+/**
+ * Restores a traveller session only with the recovery code issued at verified
+ * onboarding. A DID or tourist ID identifies the record; it is not a secret
+ * and can never by itself grant access to the protected tourist dashboard.
+ */
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { identifier, did, touristId } = body;
-    const searchId = (identifier || did || touristId || '').trim();
+    const searchId = String(body.identifier || body.did || body.touristId || '').trim();
+    const recoveryAccessCode = String(body.recoveryAccessCode || '').trim();
 
-    if (!searchId) {
-      return NextResponse.json(
-        { success: false, error: 'Tourist DID or Tourist ID is required.' },
-        { status: 400 }
-      );
+    if (!searchId || !recoveryAccessCode) {
+      return NextResponse.json({ success: false, error: 'Tourist ID or DID and the onboarding recovery code are required.' }, { status: 400 });
+    }
+    if (searchId.length > 300 || recoveryAccessCode.length > 200) {
+      return NextResponse.json({ success: false, error: 'Invalid sign-in details.' }, { status: 400 });
     }
 
-    // Lookup in database. A tourist may authenticate with either their DID or
-    // their Tourist ID. We deliberately do NOT fabricate a session for an
-    // unknown identifier — the record must exist (created via onboarding/seed).
-    let tourist = await getTouristByIdOrDid(searchId);
-    if (!tourist) {
-      tourist = await getTourist(searchId);
+    const tourist = await getTouristByIdOrDid(searchId);
+    if (!tourist || tourist.identityStatus !== 'verified' || !tourist.touristAccessCodeHash || !tourist.touristAccessCodeSalt) {
+      return NextResponse.json({ success: false, error: 'Sign-in could not be verified. Re-enrol if this credential was issued before recovery codes were enabled.' }, { status: 401 });
     }
-
-    if (!tourist) {
-      // Fallback mode for unregistered / demo IDs
-      const cleanId = searchId.startsWith('did:') ? searchId.split(':').pop() || 'TOUR-7890' : searchId;
-      tourist = {
-        touristId: cleanId,
-        did: searchId.startsWith('did:') ? searchId : `did:prahari:${cleanId}`,
-        name: 'Ralston Fernandes',
-        identityStatus: 'verified',
-        nationality: 'Indian',
-      };
+    if (!verifyPassword(recoveryAccessCode, tourist.touristAccessCodeHash, tourist.touristAccessCodeSalt)) {
+      return NextResponse.json({ success: false, error: 'Sign-in could not be verified.' }, { status: 401 });
     }
-
-    // Create tourist session
-    const resolvedTouristId = tourist.touristId || 'TOUR-7890';
-    const resolvedDid = tourist.did || `did:prahari:${resolvedTouristId}`;
 
     const sessionToken = await createSessionToken({
-      userId: resolvedTouristId,
+      userId: tourist.touristId,
       role: 'tourist',
-      name: tourist.name || 'Tourist Traveller',
-      touristId: resolvedTouristId,
-      entityId: resolvedTouristId,
-      did: resolvedDid,
+      name: tourist.name || 'Traveller',
+      touristId: tourist.touristId,
+      entityId: tourist.touristId,
+      did: tourist.did,
     });
 
     const response = NextResponse.json({
       success: true,
-      message: `Authenticated as Tourist ${tourist.name || resolvedTouristId}.`,
-      token: sessionToken,
+      message: 'Traveller session restored.',
       tourist: {
-        touristId: resolvedTouristId,
+        touristId: tourist.touristId,
         name: tourist.name,
-        did: resolvedDid,
+        did: tourist.did,
         identityStatus: tourist.identityStatus,
         nationality: tourist.nationality,
       },
     });
-
     setSessionCookie(response, sessionToken);
-
     return response;
   } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error.message || 'Tourist login failed.' },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: error.message || 'Traveller sign-in failed.' }, { status: 500 });
   }
 }

@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { MessageSquare, Send, ShieldAlert, Wifi, WifiOff, CheckCircle2, Clock } from 'lucide-react';
+import { Languages, MessageSquare, Send, Wifi, WifiOff, CheckCircle2 } from 'lucide-react';
 import { createChatPacket, SOSPacket } from '@/lib/sos-mesh/sosPacket';
 import { saveChatMessage, getChatMessagesForIncident } from '@/lib/sos-mesh/indexedDbQueue';
+import { COMMUNICATION_LANGUAGES, languageLabel } from '@/lib/languages';
 
 interface OfflineEmergencyChatProps {
   incidentId: string;
@@ -22,9 +23,9 @@ export default function OfflineEmergencyChat({
 }: OfflineEmergencyChatProps) {
   const [messages, setMessages] = useState<SOSPacket[]>([]);
   const [text, setText] = useState('');
+  const [messageLanguage, setMessageLanguage] = useState('en-IN');
   const [isOnline, setIsOnline] = useState<boolean>(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
 
   // Monitor network status
   useEffect(() => {
@@ -39,37 +40,27 @@ export default function OfflineEmergencyChat({
     };
   }, []);
 
-  // Load stored messages & setup mesh broadcast channel
+  // Load locally retained messages. The server transcript is fetched separately
+  // when online; local messages remain visibly pending until that succeeds.
   useEffect(() => {
     void (async () => {
       const stored = await getChatMessagesForIncident(incidentId);
       setMessages(stored);
     })();
 
-    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+    let syncing = false;
+    const sync = async () => {
+      if (syncing || !navigator.onLine) return;
+      syncing = true;
       try {
-        const channel = new BroadcastChannel('prahari_chat_mesh');
-        broadcastChannelRef.current = channel;
-        channel.onmessage = (event) => {
-          if (event.data?.type === 'EMERGENCY_CHAT_MESSAGE' && event.data.packet) {
-            const incoming: SOSPacket = event.data.packet;
-            if (incoming.incidentId === incidentId) {
-              void saveChatMessage(incoming);
-              setMessages((prev) => {
-                if (prev.some((m) => m.packetId === incoming.packetId)) return prev;
-                return [...prev, incoming].sort((a, b) => a.timestamp - b.timestamp);
-              });
-            }
-          }
-        };
-      } catch (e) {
-        console.warn('[OfflineEmergencyChat] BroadcastChannel error:', e);
-      }
-    }
-
-    // Server Sync Poller
-    const syncInterval = window.setInterval(async () => {
-      try {
+        const locallyQueued = await getChatMessagesForIncident(incidentId);
+        for (const packet of locallyQueued.filter((message) => message.senderRole === 'tourist' && message.lastKnownTransport !== 'INTERNET')) {
+          const delivery = await fetch('/api/chat-relay', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ packet }),
+          }).catch(() => null);
+          const delivered = delivery ? await delivery.json().catch(() => null) : null;
+          if (delivery?.ok && delivered?.success && delivered.packet) void saveChatMessage(delivered.packet);
+        }
         const res = await fetch(`/api/chat-relay?incidentId=${encodeURIComponent(incidentId)}`);
         if (res.ok) {
           const data = await res.json();
@@ -86,15 +77,17 @@ export default function OfflineEmergencyChat({
           }
         }
       } catch {
-        // Offline poller error ignored
+        // The locally retained message remains pending for the next connection.
+      } finally {
+        syncing = false;
       }
-    }, 4000);
+    };
+
+    void sync();
+    const syncInterval = window.setInterval(() => void sync(), 4_000);
 
     return () => {
       window.clearInterval(syncInterval);
-      if (broadcastChannelRef.current) {
-        broadcastChannelRef.current.close();
-      }
     };
   }, [incidentId]);
 
@@ -113,32 +106,30 @@ export default function OfflineEmergencyChat({
       senderRole: 'tourist',
       senderName: touristName,
       text: text.trim(),
+      language: messageLanguage,
       latitude,
       longitude,
     });
 
-    // 1. Save local IndexedDB
+    // Persist first; a failed delivery remains locally queued for a later
+    // authenticated connection.
     await saveChatMessage(packet);
     setMessages((prev) => [...prev, packet]);
     setText('');
 
-    // 2. Broadcast over local P2P Mesh
-    if (broadcastChannelRef.current) {
-      broadcastChannelRef.current.postMessage({
-        type: 'EMERGENCY_CHAT_MESSAGE',
-        packet,
-      });
-    }
-
-    // 3. Post to Gateway API endpoint
     try {
-      await fetch('/api/chat-relay', {
+      const response = await fetch('/api/chat-relay', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ packet }),
       });
+      const delivered = await response.json().catch(() => null);
+      if (response.ok && delivered?.success && delivered.packet) {
+        await saveChatMessage(delivered.packet);
+        setMessages((current) => current.map((message) => message.packetId === packet.packetId ? delivered.packet : message));
+      }
     } catch {
-      // Offline fallback: saved in IndexedDB
+      // Retained locally and retried by the online sync loop.
     }
   };
 
@@ -146,11 +137,11 @@ export default function OfflineEmergencyChat({
     <div className="rounded-xl border border-line bg-surface-2 p-4 text-ink">
       <div className="mb-3 flex items-center justify-between border-b border-line pb-2">
         <h3 className="flex items-center gap-2 text-sm font-semibold tracking-tight text-ink">
-          <MessageSquare className="size-4 text-sky-400" /> Emergency Two-Way Mesh Chat
+          <MessageSquare className="size-4 text-sky-400" /> Emergency messages
         </h3>
         <span className="flex items-center gap-1 rounded-full bg-surface border border-line px-2.5 py-0.5 font-mono text-xs font-medium text-sky-300">
           {isOnline ? <Wifi className="size-3 text-emerald-400" /> : <WifiOff className="size-3 text-amber-400" />}
-          {isOnline ? 'Direct Gateway' : 'Mesh Relay Active'}
+          {isOnline ? 'Connected to command server' : 'Stored locally — awaiting connection'}
         </span>
       </div>
 
@@ -158,7 +149,7 @@ export default function OfflineEmergencyChat({
       <div className="max-h-56 min-h-[120px] overflow-y-auto rounded-lg border border-line bg-surface p-3 space-y-2.5">
         {messages.length === 0 ? (
           <p className="py-4 text-center text-xs text-ink-soft">
-            No messages sent yet. Send a message to communicate with Police Command even without internet.
+            No messages sent yet. Online messages are delivered to the authorised command team; offline messages stay on this device until it reconnects.
           </p>
         ) : (
           messages.map((msg) => {
@@ -182,9 +173,12 @@ export default function OfflineEmergencyChat({
                 >
                   {msg.chatText}
                 </div>
+                {msg.senderRole === 'authority' && msg.originalText && (
+                  <p className="mt-1 max-w-[85%] text-[10px] leading-4 text-ink-soft">Official original ({languageLabel(msg.originalLanguage)}): {msg.originalText}</p>
+                )}
                 <div className="mt-0.5 flex items-center gap-1 text-[9px] text-sky-300/70 font-mono">
                   <CheckCircle2 className="size-2.5 text-emerald-400" />
-                  <span>{msg.lastKnownTransport || 'MESH_RELAY'}</span>
+                  <span>{msg.lastKnownTransport === 'INTERNET' ? 'Sent to authority queue' : 'Stored locally — pending delivery'}</span>
                 </div>
               </div>
             );
@@ -194,7 +188,13 @@ export default function OfflineEmergencyChat({
       </div>
 
       {/* Message Input Form */}
-      <form onSubmit={handleSendMessage} className="mt-3 flex items-center gap-2">
+      <form onSubmit={handleSendMessage} className="mt-3 space-y-2">
+        <label className="flex items-center gap-1.5 text-[11px] text-ink-soft"><Languages className="size-3.5 text-sky-400" /> I&apos;m writing in
+          <select value={messageLanguage} onChange={(event) => setMessageLanguage(event.target.value)} className="rounded border border-line bg-surface px-2 py-1 text-[11px] text-ink">
+            {COMMUNICATION_LANGUAGES.map((language) => <option key={language.code} value={language.code}>{language.label}</option>)}
+          </select>
+        </label>
+        <div className="flex items-center gap-2">
         <input
           type="text"
           value={text}
@@ -209,6 +209,7 @@ export default function OfflineEmergencyChat({
         >
           <Send className="size-3.5" /> Send
         </button>
+        </div>
       </form>
     </div>
   );

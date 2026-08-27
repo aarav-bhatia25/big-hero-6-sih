@@ -6,6 +6,9 @@ import {
 } from "@/lib/db";
 import { createSessionToken, setSessionCookie } from "@/lib/auth/session";
 import { anchorCredential } from "@/lib/blockchain/registry";
+import { isCommunicationLanguageCode } from '@/lib/languages';
+import { hashPassword } from '@/lib/auth/crypto';
+import { randomBytes } from 'node:crypto';
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +20,7 @@ function makeTouristId(nationalityCode: string, subjectHash: string): string {
 
 export async function POST(request: NextRequest) {
   try {
-    const { sessionId, otp, emergencyContacts, accommodation, itinerary, visitEndsAt, trackingConsent } = await request.json();
+    const { sessionId, otp, emergencyContacts, accommodation, itinerary, visitEndsAt, trackingConsent, communicationLanguage } = await request.json();
     if (!sessionId) {
       return NextResponse.json({ ok: false, error: "sessionId is required." }, { status: 400 });
     }
@@ -47,6 +50,13 @@ export async function POST(request: NextRequest) {
     // Same document -> same DID. Re-enrolment updates rather than duplicates.
     const existing = await getTouristBySubjectHash(subject.subjectHash);
     const touristId = existing?.touristId ?? makeTouristId(subject.nationalityCode, subject.subjectHash);
+    if (communicationLanguage !== undefined && !isCommunicationLanguageCode(communicationLanguage)) {
+      return NextResponse.json({ ok: false, error: 'Choose a supported preferred communication language.' }, { status: 400 });
+    }
+    const preferences = {
+      ...(existing?.preferences && typeof existing.preferences === 'object' ? existing.preferences : {}),
+      ...(communicationLanguage ? { language: communicationLanguage } : {}),
+    };
 
     const requestedVisitEnd = typeof visitEndsAt === 'string' ? new Date(visitEndsAt) : null;
     if (requestedVisitEnd && (!Number.isFinite(requestedVisitEnd.getTime()) || requestedVisitEnd.getTime() <= Date.now())) {
@@ -71,6 +81,11 @@ export async function POST(request: NextRequest) {
     const issued = issueCredential(subject, touristId, kycProvider.id, kycProvider.isSandbox, {
       expiresAt: normalizedItinerary?.visitEndsAt ?? existing?.itinerary?.visitEndsAt,
     });
+    // A returning traveller must prove possession of this one-time-issued
+    // recovery code. The raw value is shown only in this response; the database
+    // receives a salted PBKDF2 hash, never the code itself.
+    const recoveryAccessCode = randomBytes(18).toString('base64url');
+    const recoveryCode = hashPassword(recoveryAccessCode);
 
     const saved = await upsertTourist({
       touristId,
@@ -88,7 +103,10 @@ export async function POST(request: NextRequest) {
       kycProvider: kycProvider.id,
       kycVerifiedAt: new Date().toISOString(),
       kycSubjectHash: subject.subjectHash,
+      touristAccessCodeHash: recoveryCode.hash,
+      touristAccessCodeSalt: recoveryCode.salt,
       trackingConsent: trackingConsent ?? true,
+      ...(Object.keys(preferences).length ? { preferences } : {}),
       ...(normalizedEmergencyContacts.length ? { emergencyContacts: normalizedEmergencyContacts } : {}),
       ...(accommodation ? { accommodation } : {}),
       ...(normalizedItinerary ? { itinerary: normalizedItinerary } : {}),
@@ -155,7 +173,7 @@ export async function POST(request: NextRequest) {
       anchorTxHash: anchor?.txHash || null,
       anchorChainId: anchor?.chainId ?? null,
       anchored: Boolean(anchor),
-      token: sessionToken,
+      recoveryAccessCode,
     });
 
     setSessionCookie(response, sessionToken);
@@ -164,10 +182,4 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }
-}
-
-return response;
-  } catch (error: any) {
-  return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
-}
 }

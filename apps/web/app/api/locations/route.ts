@@ -1,10 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
-import { insertLocation, listLocations, listActiveGeofences, insertIncident, listIncidents, getTourist, updateTourist } from "@/lib/db";
+import { insertLocation, listLocations, listActiveGeofences, insertIncident, listIncidents, getTourist, updateTourist, updateIncident } from "@/lib/db";
 import { checkPointInGeofence, type GeofenceZone } from "@/lib/geospatial";
 import { emitToGateway } from "@/lib/services/gatewayEmit";
 import { requireAuth, canAccessTouristData } from "@/lib/auth/guards";
-import { assessSafetyRisk, type SafetyCoordinates } from "@/lib/safetyRisk";
-import { operationalGeofences } from "@/lib/operationalData";
+import { assessSafetyRisk, distanceMeters, type SafetyCoordinates } from "@/lib/safetyRisk";
+import { operationalGeofences, operationalIncidents } from "@/lib/operationalData";
+import { getNearbyIndiaHazards, hazardEnvironmentalRisk, type HazardFeedResult } from "@/lib/services/indiaHazards";
+import { notifyEmergencyContacts } from "@/lib/services/emergencyNotifications";
+
+function geofenceType(value: unknown): GeofenceZone['type'] {
+  switch (String(value ?? '').toLowerCase()) {
+    case 'safe_zone': return 'SAFE';
+    case 'restricted': return 'RESTRICTED';
+    case 'pickpocket_hotspot': return 'PICKPOCKET_HOTSPOT';
+    case 'disaster_prone':
+    case 'hazard': return 'DISASTER_PRONE';
+    case 'tourist_only': return 'TOURIST_ONLY';
+    default: return 'HIGH_RISK';
+  }
+}
 
 export async function POST(request: NextRequest) {
   const auth = await requireAuth(request, ['tourist', 'authority', 'admin', 'responder']);
@@ -41,6 +55,12 @@ export async function POST(request: NextRequest) {
     }
 
     const tourist = await getTourist(touristId);
+    if (!tourist) {
+      return NextResponse.json(
+        { success: false, error: 'Tourist record not found.' },
+        { status: 404 },
+      );
+    }
     if (tourist?.trackingConsent === false) {
       return NextResponse.json(
         { success: false, error: "Location sharing is disabled for this tourist." },
@@ -64,17 +84,14 @@ export async function POST(request: NextRequest) {
     // ── Server-side geofence and safety-signal assessment ─────────────
     let breach: { incidentId: string; zone: string } | null = null;
     let safetyReview: { incidentId: string } | null = null;
+    let hazards: HazardFeedResult | null = null;
     let zones: GeofenceZone[] = [];
     try {
       const dbGeofences = operationalGeofences(await listActiveGeofences());
       zones = dbGeofences.map((g: any) => ({
         id: g.id || g.name,
         name: g.name,
-        type: String(g.type ?? '').toLowerCase() === 'safe_zone'
-          ? "SAFE"
-          : String(g.type ?? '').toLowerCase() === 'restricted'
-            ? "RESTRICTED"
-            : "HIGH_RISK",
+        type: geofenceType(g.type),
         severity: (String(g.severity).toUpperCase() || "HIGH") as any,
         coordinates:
           g.coordinates ||
@@ -85,6 +102,25 @@ export async function POST(request: NextRequest) {
     } catch (err) {
       console.warn("[prahari] geofence lookup failed:", err);
     }
+
+    // Official hazards contribute a contextual safety signal; an unavailable
+    // feed is never interpreted as an all-clear result.
+    try {
+      hazards = await getNearbyIndiaHazards({ lat, lng }, 10);
+    } catch (err) {
+      console.warn("[prahari] NDMA SACHET hazard lookup failed:", err);
+    }
+
+    const operationalHistory = operationalIncidents(await listIncidents(500));
+    const reviewWindowStart = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    const localIncidentCount = operationalHistory.filter((incident: any) => {
+      const incidentAt = new Date(incident.createdAt ?? 0).getTime();
+      const incidentLat = incident.location?.lat;
+      const incidentLng = incident.location?.lng;
+      return Number.isFinite(incidentAt) && incidentAt >= reviewWindowStart &&
+        typeof incidentLat === 'number' && typeof incidentLng === 'number' &&
+        distanceMeters({ lat, lng }, { lat: incidentLat, lng: incidentLng }) <= 2_000;
+    }).length;
 
     const check = checkPointInGeofence(lat, lng, zones);
     const itineraryRoute = Array.isArray(tourist?.itinerary?.route)
@@ -98,6 +134,8 @@ export async function POST(request: NextRequest) {
       accuracy,
       reportedSpeedMps: typeof speed === "number" ? speed : null,
       zoneRisk: check.riskPenalty,
+      localIncidentCount,
+      environmentalRisk: hazardEnvironmentalRisk(hazards?.alerts),
       plannedRoute: itineraryRoute,
     });
 
@@ -111,15 +149,23 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Your location was saved, but the safety assessment could not be recorded.' }, { status: 503 });
     }
 
-    // Broadcast the location update to the authorised staff dashboard.
-    await emitToGateway("tourist:location", { touristId, lat, lng, timestamp: ping.timestamp, safety });
+    // Broadcast the consented telemetry and its advisory result to the
+    // authorised staff dashboard in one event.
+    await emitToGateway("tourist:location", {
+      touristId,
+      lat,
+      lng,
+      timestamp: ping.timestamp,
+      safety,
+      hazards: hazards?.alerts ?? [],
+      hazardFeedStatus: hazards?.status ?? 'unavailable',
+    });
 
     try {
       if (check.isBreached && check.breachedZone) {
         // Only create an incident if there isn't already an active breach incident
         // for this tourist in the last 30 minutes
-        const recentIncidents = await listIncidents(50);
-        const recentBreach = recentIncidents.find(
+        const recentBreach = operationalHistory.find(
           (i: any) =>
             i.touristId === touristId &&
             i.type === "GEOFENCE_BREACH" &&
@@ -148,17 +194,22 @@ export async function POST(request: NextRequest) {
           };
 
           if (!await insertIncident(incident as any)) throw new Error('Could not record the geofence incident.');
-          await emitToGateway("incident:create", incident);
+          const notificationPlan = await notifyEmergencyContacts(tourist.emergencyContacts, incidentId, {
+            kind: 'geofence_breach',
+            zoneName: check.breachedZone.name,
+          });
+          const recordedIncident = (await updateIncident(incidentId, { emergencyContactNotifications: notificationPlan })) ?? incident;
+          await emitToGateway("incident:create", recordedIncident);
           breach = { incidentId, zone: check.breachedZone.name };
         }
       }
 
       // A score is an investigation lead, not a finding of danger. Only a
       // high/critical multi-signal score opens an explicit review queue item;
-      // it never dispatches police or messages contacts automatically.
+      // it never dispatches police automatically. Registered contacts receive
+      // an explicitly qualified email alert through the configured provider.
       if (safety.requiresHumanReview) {
-        const recentIncidents = await listIncidents(50);
-        const existingReview = recentIncidents.find(
+        const existingReview = operationalHistory.find(
           (incident: any) =>
             incident.touristId === touristId &&
             incident.type === "SAFETY_SIGNAL" &&
@@ -190,7 +241,9 @@ export async function POST(request: NextRequest) {
             }],
           };
           if (!await insertIncident(incident)) throw new Error('Could not record the safety-review incident.');
-          await emitToGateway("incident:create", incident);
+          const notificationPlan = await notifyEmergencyContacts(tourist.emergencyContacts, incidentId, { kind: 'safety_review' });
+          const recordedIncident = (await updateIncident(incidentId, { emergencyContactNotifications: notificationPlan })) ?? incident;
+          await emitToGateway("incident:create", recordedIncident);
           safetyReview = { incidentId };
         }
       }
@@ -198,7 +251,7 @@ export async function POST(request: NextRequest) {
       console.warn("[prahari] server-side safety assessment failed:", err);
     }
 
-    return NextResponse.json({ success: true, ping, breach, safety, safetyReview });
+    return NextResponse.json({ success: true, ping, breach, safety, safetyReview, hazards });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }

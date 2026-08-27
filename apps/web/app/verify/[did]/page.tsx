@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
-import { ArrowLeft, CheckCircle2, CircleX, ExternalLink, FlaskConical, Link2, Loader2 } from 'lucide-react';
+import { useParams, useSearchParams } from 'next/navigation';
+import { ArrowLeft, CheckCircle2, CircleX, ExternalLink, FlaskConical, Link2, Loader2, LockKeyhole } from 'lucide-react';
 
 type VerificationRecord = {
   ok: boolean;
@@ -11,11 +11,8 @@ type VerificationRecord = {
   error?: string;
   reason?: string;
   did?: string;
-  touristId?: string;
-  holderName?: string;
-  nationality?: string;
-  identityStatus?: string;
-  credentialHash?: string;
+  credentialStatus?: string;
+  verificationMethod?: string;
   issuedAt?: string | null;
   expiresAt?: string | null;
   sandbox?: boolean;
@@ -26,6 +23,10 @@ type VerificationRecord = {
     chainId: number;
     txHash: string | null;
   } | null;
+  disclosure?: {
+    personalDataDisclosed: boolean;
+    detailAccess: string;
+  };
 };
 
 function date(value?: string | null) {
@@ -34,20 +35,23 @@ function date(value?: string | null) {
 
 export default function CredentialVerificationPage() {
   const params = useParams<{ did: string }>();
+  const searchParams = useSearchParams();
   const did = useMemo(() => decodeURIComponent(params.did ?? ''), [params.did]);
+  const claimHash = searchParams.get('h');
   const [record, setRecord] = useState<VerificationRecord | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!did) return;
-    void fetch(`/api/identity/verify/${encodeURIComponent(did)}`, { cache: 'no-store' })
+    const endpoint = `/api/identity/verify/${encodeURIComponent(did)}${claimHash ? `?h=${encodeURIComponent(claimHash)}` : ''}`;
+    void fetch(endpoint, { cache: 'no-store' })
       .then(async (response) => {
         const payload = await response.json() as VerificationRecord;
         setRecord(payload);
       })
       .catch(() => setRecord({ ok: false, valid: false, error: 'The verification service could not be reached.' }))
       .finally(() => setLoading(false));
-  }, [did]);
+  }, [did, claimHash]);
 
   const explorer = record?.blockchain?.chainId === 11155111 && record.blockchain.txHash
     ? `https://sepolia.etherscan.io/tx/${record.blockchain.txHash}`
@@ -106,12 +110,10 @@ export default function CredentialVerificationPage() {
 
             <dl className="grid gap-x-8 gap-y-4 border-y border-line py-6 text-sm sm:grid-cols-2">
               {[
-                ['Holder', record.holderName],
-                ['Tourist ID', record.touristId],
-                ['Nationality', record.nationality],
+                ['Verification method', record.verificationMethod],
+                ['Credential status', record.credentialStatus],
                 ['Valid until', date(record.expiresAt)],
                 ['DID', record.did],
-                ['Credential hash', record.credentialHash],
               ].map(([label, value]) => (
                 <div key={label}>
                   <dt className="text-xs font-semibold uppercase tracking-wide text-ink-soft">{label}</dt>
@@ -119,6 +121,18 @@ export default function CredentialVerificationPage() {
                 </div>
               ))}
             </dl>
+
+            <div className="rounded-xl border border-line bg-surface-2 p-5">
+              <div className="flex items-start gap-3">
+                <LockKeyhole className="mt-0.5 shrink-0 text-sky-400" size={21} />
+                <div>
+                  <h2 className="font-semibold text-ink">Privacy-preserving scan</h2>
+                  <p className="mt-1 text-sm leading-6 text-ink-soft">
+                    {record.disclosure?.detailAccess ?? 'This scan does not disclose personal information, identity document data, emergency contacts, or location.'}
+                  </p>
+                </div>
+              </div>
+            </div>
 
             <div className="rounded-xl border border-line bg-surface-2 p-5">
               <div className="flex items-start gap-3">

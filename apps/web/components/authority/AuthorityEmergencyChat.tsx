@@ -1,22 +1,27 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { MessageSquare, Send, Shield, CheckCircle2 } from 'lucide-react';
+import { Languages, Loader2, MessageSquare, Send, Shield, CheckCircle2 } from 'lucide-react';
 import { createChatPacket, SOSPacket } from '@/lib/sos-mesh/sosPacket';
+import { COMMUNICATION_LANGUAGES, languageLabel } from '@/lib/languages';
 
 interface AuthorityEmergencyChatProps {
   incidentId: string;
   touristName?: string;
+  touristLanguage?: string;
 }
 
-export default function AuthorityEmergencyChat({ incidentId, touristName = 'Traveller' }: AuthorityEmergencyChatProps) {
+export default function AuthorityEmergencyChat({ incidentId, touristName = 'Traveller', touristLanguage = 'en-IN' }: AuthorityEmergencyChatProps) {
   const [messages, setMessages] = useState<SOSPacket[]>([]);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  const [outgoingLanguage, setOutgoingLanguage] = useState('en-IN');
+  const [translations, setTranslations] = useState<Record<string, string>>({});
+  const [translationError, setTranslationError] = useState<string | null>(null);
+  const [translatingPacketId, setTranslatingPacketId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
 
-  // Load chat transcript & setup broadcast listener
+  // Load the protected, server-persisted chat transcript.
   useEffect(() => {
     const fetchTranscript = async () => {
       try {
@@ -35,31 +40,8 @@ export default function AuthorityEmergencyChat({ incidentId, touristName = 'Trav
     void fetchTranscript();
     const interval = window.setInterval(fetchTranscript, 3000);
 
-    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-      try {
-        const channel = new BroadcastChannel('prahari_chat_mesh');
-        broadcastChannelRef.current = channel;
-        channel.onmessage = (event) => {
-          if (event.data?.type === 'EMERGENCY_CHAT_MESSAGE' && event.data.packet) {
-            const incoming: SOSPacket = event.data.packet;
-            if (incoming.incidentId === incidentId) {
-              setMessages((prev) => {
-                if (prev.some((m) => m.packetId === incoming.packetId)) return prev;
-                return [...prev, incoming].sort((a, b) => a.timestamp - b.timestamp);
-              });
-            }
-          }
-        };
-      } catch (e) {
-        console.warn('[AuthorityEmergencyChat] BroadcastChannel error:', e);
-      }
-    }
-
     return () => {
       window.clearInterval(interval);
-      if (broadcastChannelRef.current) {
-        broadcastChannelRef.current.close();
-      }
     };
   }, [incidentId]);
 
@@ -73,12 +55,31 @@ export default function AuthorityEmergencyChat({ incidentId, touristName = 'Trav
 
     try {
       setSending(true);
+      setTranslationError(null);
+      let deliveredText = text.trim();
+      if (outgoingLanguage !== touristLanguage) {
+        const translationResponse = await fetch('/api/multilingual/translate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            incidentId,
+            text: deliveredText,
+            sourceLanguage: outgoingLanguage,
+            targetLanguage: touristLanguage,
+          }),
+        });
+        const translation = await translationResponse.json().catch(() => null);
+        if (!translationResponse.ok || !translation?.success) throw new Error(translation?.error || 'Message translation could not be completed.');
+        deliveredText = translation.translatedText;
+      }
       const packet = createChatPacket({
         incidentId,
         touristId: 'POLICE-HQ',
         senderRole: 'authority',
         senderName: 'Police Command HQ',
-        text: text.trim(),
+        text: deliveredText,
+        language: touristLanguage,
+        ...(deliveredText !== text.trim() ? { originalText: text.trim(), originalLanguage: outgoingLanguage } : {}),
       });
 
       // 1. Post to Gateway API
@@ -88,17 +89,14 @@ export default function AuthorityEmergencyChat({ incidentId, touristName = 'Trav
         body: JSON.stringify({ packet }),
       });
 
-      if (res.ok) {
-        setMessages((prev) => [...prev, packet]);
+      const result = await res.json().catch(() => null);
+      if (res.ok && result?.success) {
+        const authenticatedPacket = result.packet ?? packet;
+        setMessages((prev) => [...prev, authenticatedPacket]);
         setText('');
 
-        // 2. Broadcast over local mesh
-        if (broadcastChannelRef.current) {
-          broadcastChannelRef.current.postMessage({
-            type: 'EMERGENCY_CHAT_MESSAGE',
-            packet,
-          });
-        }
+      } else {
+        throw new Error(result?.error || 'Failed to dispatch the translated response.');
       }
     } catch (err: any) {
       window.alert(err.message || 'Failed to dispatch chat response.');
@@ -107,20 +105,45 @@ export default function AuthorityEmergencyChat({ incidentId, touristName = 'Trav
     }
   };
 
+  const translateIncoming = async (message: SOSPacket) => {
+    if (!message.chatText || translations[message.packetId]) return;
+    setTranslatingPacketId(message.packetId);
+    setTranslationError(null);
+    try {
+      const response = await fetch('/api/multilingual/translate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          incidentId,
+          text: message.chatText,
+          sourceLanguage: message.chatLanguage || touristLanguage,
+          targetLanguage: 'en-IN',
+        }),
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !result?.success) throw new Error(result?.error || 'Message translation could not be completed.');
+      setTranslations((current) => ({ ...current, [message.packetId]: result.translatedText }));
+    } catch (error: any) {
+      setTranslationError(error.message || 'Message translation could not be completed.');
+    } finally {
+      setTranslatingPacketId(null);
+    }
+  };
+
   return (
     <div className="mt-5 rounded-xl border border-line bg-surface p-4 text-ink">
       <div className="mb-3 flex items-center justify-between border-b border-line pb-2">
         <h3 className="flex items-center gap-2 text-sm font-semibold tracking-tight text-ink">
-          <Shield className="size-4 text-emerald-400" /> Police Authority Emergency Communications Console
+          <Shield className="size-4 text-emerald-400" /> Multilingual emergency communications
         </h3>
-        <span className="font-mono text-xs text-ink-soft">Direct Mesh Bridge • {incidentId}</span>
+        <span className="font-mono text-xs text-ink-soft">Traveller: {languageLabel(touristLanguage)} • {incidentId}</span>
       </div>
 
       {/* Transcript List */}
       <div className="max-h-56 min-h-[120px] overflow-y-auto rounded-lg border border-line bg-surface-2 p-3 space-y-2.5">
         {messages.length === 0 ? (
           <p className="py-4 text-center text-xs text-ink-soft">
-            No messages exchanged yet with {touristName}. Type a response below to transmit via mesh relay.
+            No messages exchanged yet with {touristName}. Type a response below to send through the protected command channel.
           </p>
         ) : (
           messages.map((msg) => {
@@ -142,11 +165,23 @@ export default function AuthorityEmergencyChat({ incidentId, touristName = 'Trav
                       : 'bg-surface border border-sky-500/40 text-sky-200 rounded-bl-none'
                   }`}
                 >
-                  {msg.chatText}
+                  {isAuthority && msg.originalText ? msg.originalText : msg.chatText}
                 </div>
+                {isAuthority && msg.originalText && (
+                  <p className="mt-1 max-w-[85%] text-[10px] leading-4 text-ink-soft">Delivered in {languageLabel(msg.chatLanguage)}: {msg.chatText}</p>
+                )}
+                {!isAuthority && translations[msg.packetId] && (
+                  <p className="mt-1 max-w-[85%] rounded bg-sky-500/10 px-2 py-1 text-[10px] leading-4 text-sky-200">English: {translations[msg.packetId]}</p>
+                )}
+                {!isAuthority && msg.chatText && !translations[msg.packetId] && (
+                  <button type="button" onClick={() => void translateIncoming(msg)} disabled={translatingPacketId === msg.packetId}
+                    className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold text-sky-300 underline disabled:opacity-50">
+                    {translatingPacketId === msg.packetId ? <Loader2 className="size-3 animate-spin" /> : <Languages className="size-3" />} Translate to English
+                  </button>
+                )}
                 <div className="mt-0.5 flex items-center gap-1 text-[9px] text-emerald-400/80 font-mono">
                   <CheckCircle2 className="size-2.5" />
-                  <span>Mesh Hop: {msg.hopCount} ({msg.lastKnownTransport || 'RELAY'})</span>
+                  <span>{msg.lastKnownTransport === 'INTERNET' ? 'Saved to command record' : 'Pending delivery'}</span>
                 </div>
               </div>
             );
@@ -155,8 +190,19 @@ export default function AuthorityEmergencyChat({ incidentId, touristName = 'Trav
         <div ref={messagesEndRef} />
       </div>
 
+      {translationError && <p role="alert" className="mt-2 text-xs text-rose-300">{translationError}</p>}
+
       {/* Authority Response Form */}
-      <form onSubmit={handleSendResponse} className="mt-3 flex items-center gap-2">
+      <form onSubmit={handleSendResponse} className="mt-3 space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-ink-soft">
+          <label className="flex items-center gap-1.5"><Languages className="size-3.5 text-sky-400" /> Officer writes in
+            <select value={outgoingLanguage} onChange={(event) => setOutgoingLanguage(event.target.value)} className="rounded border border-line bg-surface-2 px-2 py-1 text-[11px] text-ink">
+              {COMMUNICATION_LANGUAGES.map((language) => <option key={language.code} value={language.code}>{language.label}</option>)}
+            </select>
+          </label>
+          <span>{outgoingLanguage === touristLanguage ? 'Sent as written' : `Translated to ${languageLabel(touristLanguage)} before transmission`}</span>
+        </div>
+        <div className="flex items-center gap-2">
         <input
           type="text"
           value={text}
@@ -169,8 +215,9 @@ export default function AuthorityEmergencyChat({ incidentId, touristName = 'Trav
           disabled={!text.trim() || sending}
           className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-emerald-500 disabled:opacity-50"
         >
-          <Send className="size-3.5" /> Transmit Response
+          {sending ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />} {outgoingLanguage === touristLanguage ? 'Transmit response' : 'Translate & transmit'}
         </button>
+        </div>
       </form>
     </div>
   );

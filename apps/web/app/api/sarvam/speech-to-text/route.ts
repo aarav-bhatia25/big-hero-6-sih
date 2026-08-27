@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireAuth } from '@/lib/auth/guards';
+import { isCommunicationLanguageCode } from '@/lib/languages';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
+  const auth = await requireAuth(request, ['tourist']);
+  if (auth.errorResponse) return auth.errorResponse;
   try {
     const formData = await request.formData();
     const audioFile = formData.get('file') as Blob | File | null;
@@ -16,6 +20,12 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+    if (!isCommunicationLanguageCode(languageCode)) {
+      return NextResponse.json({ success: false, error: 'Choose a supported Indian or English voice language.' }, { status: 400 });
+    }
+    if (audioFile.size > 10 * 1024 * 1024) {
+      return NextResponse.json({ success: false, error: 'Voice recording must be 10 MB or smaller.' }, { status: 413 });
+    }
     if (!sarvamApiKey) {
       return NextResponse.json(
         { success: false, error: 'Voice transcription is not configured. Set SARVAM_API_KEY on the server to enable it.' },
@@ -23,10 +33,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Prepare multipart form data for Sarvam AI Speech-to-Text API (saarika:v2.5)
+    // Saaras v3 is Sarvam's current speech-recognition model. It preserves the
+    // speaker's language; officer-facing translation is a separate explicit
+    // step so staff can always inspect the original message.
     const outboundForm = new FormData();
     outboundForm.append('file', audioFile, 'sos_audio.webm');
-    outboundForm.append('model', 'saarika:v2.5');
+    outboundForm.append('model', process.env.SARVAM_STT_MODEL || 'saaras:v3');
+    outboundForm.append('mode', 'transcribe');
     outboundForm.append('language_code', languageCode);
 
     const sarvamRes = await fetch('https://api.sarvam.ai/speech-to-text', {
@@ -50,7 +63,6 @@ export async function POST(request: NextRequest) {
       transcript: data.transcript || data.text || 'Emergency SOS Voice Ping Received',
       language_code: data.language_code || languageCode,
       provider: 'sarvam_ai',
-      raw: data,
     });
   } catch (err: any) {
     console.error('[sarvam-stt-exception]', err);

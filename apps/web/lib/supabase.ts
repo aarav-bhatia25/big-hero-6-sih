@@ -17,6 +17,28 @@ export const REQUIRED_SUPABASE_TABLES = [
   "credential_issuance",
 ] as const;
 
+/** Columns introduced by the durable emergency/identity feature migrations. */
+export const REQUIRED_SUPABASE_COLUMNS: Record<string, readonly string[]> = {
+  tourists: ['clothingProfile', 'touristAccessCodeHash', 'touristAccessCodeSalt'],
+  incidents: [
+    'emergencyContactNotifications',
+    'cancelledAt',
+    'cancelledBy',
+    'missingPersonDraft',
+    'transportType',
+    'hopCount',
+    'originalTimestamp',
+    'relayPath',
+    'originDeviceId',
+    'packetId',
+    'voiceStatement',
+    'voiceStatementLanguage',
+    'emergencyIdentificationProfile',
+    'emergencyIdentificationProfileSharedAt',
+    'incidentMessages',
+  ],
+};
+
 export type DatabaseReadiness = {
   provider: "supabase";
   projectHost: string | null;
@@ -24,19 +46,20 @@ export type DatabaseReadiness = {
   reachable: boolean;
   ready: boolean;
   unavailableTables: string[];
+  unavailableColumns: string[];
 };
 
 /**
  * Server-side Supabase client (service_role — bypasses RLS).
- * Returns null when env vars are absent so routes fall back to mock data
- * instead of crashing the dev server.
+ * Returns null when env vars are absent so local development can use
+ * process-local records. The health endpoint reports this as not ready.
  */
 export function getSupabase(): SupabaseClient | null {
   if (globalForSupabase.supabase !== undefined) return globalForSupabase.supabase;
 
   if (!url || !serviceKey) {
     console.warn(
-      "[prahari] NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set — running on mock data."
+      "[prahari] NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set — using process-local development records."
     );
     globalForSupabase.supabase = null;
     return null;
@@ -53,7 +76,7 @@ export const isSupabaseConfigured = Boolean(url && serviceKey);
 /**
  * Performs non-mutating, service-role checks for every required table. This is
  * deliberately used by the health endpoint so a deployment never looks healthy
- * while requests are quietly falling back to process-local demo data.
+ * while requests are quietly falling back to process-local development records.
  */
 export async function getDatabaseReadiness(): Promise<DatabaseReadiness> {
   const projectHost = (() => {
@@ -67,6 +90,7 @@ export async function getDatabaseReadiness(): Promise<DatabaseReadiness> {
       reachable: false,
       ready: false,
       unavailableTables: [...REQUIRED_SUPABASE_TABLES],
+      unavailableColumns: Object.entries(REQUIRED_SUPABASE_COLUMNS).flatMap(([table, columns]) => columns.map((column) => `${table}.${column}`)),
     };
   }
 
@@ -79,6 +103,7 @@ export async function getDatabaseReadiness(): Promise<DatabaseReadiness> {
       reachable: false,
       ready: false,
       unavailableTables: [...REQUIRED_SUPABASE_TABLES],
+      unavailableColumns: Object.entries(REQUIRED_SUPABASE_COLUMNS).flatMap(([table, columns]) => columns.map((column) => `${table}.${column}`)),
     };
   }
 
@@ -96,13 +121,29 @@ export async function getDatabaseReadiness(): Promise<DatabaseReadiness> {
     })
   );
   const unavailableTables = checks.filter((check) => !check.available).map((check) => check.table);
+  const columnChecks = await Promise.all(
+    Object.entries(REQUIRED_SUPABASE_COLUMNS).flatMap(([table, columns]) =>
+      columns.map(async (column) => {
+        try {
+          const { error } = await client.from(table).select(column).limit(1);
+          return { table, column, available: !error };
+        } catch {
+          return { table, column, available: false };
+        }
+      }),
+    ),
+  );
+  const unavailableColumns = columnChecks
+    .filter((check) => !check.available)
+    .map((check) => `${check.table}.${check.column}`);
 
   return {
     provider: "supabase",
     projectHost,
     configured: true,
     reachable: unavailableTables.length < REQUIRED_SUPABASE_TABLES.length,
-    ready: unavailableTables.length === 0,
+    ready: unavailableTables.length === 0 && unavailableColumns.length === 0,
     unavailableTables,
+    unavailableColumns,
   };
 }

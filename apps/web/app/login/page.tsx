@@ -31,6 +31,7 @@ function LoginFormContent() {
 
   // Tourist Form State
   const [touristIdentifier, setTouristIdentifier] = useState('');
+  const [touristRecoveryCode, setTouristRecoveryCode] = useState('');
   const [touristLoading, setTouristLoading] = useState(false);
   const [touristError, setTouristError] = useState<string | null>(null);
 
@@ -40,8 +41,17 @@ function LoginFormContent() {
       .then((data) => {
         if (data.authenticated && data.user) {
           const role = data.user.role;
-          if (redirect && redirect.startsWith('/')) {
-            router.replace(redirect as any);
+          const safeRedirect = redirect.startsWith('/') ? redirect : '';
+          const isAuthorityRoute = safeRedirect === '/authority' || safeRedirect === '/admin';
+          const isResponderRoute = safeRedirect === '/dashboard';
+          const canUseRequestedRoute = Boolean(safeRedirect)
+            && (!isAuthorityRoute || role === 'admin' || role === 'authority')
+            && (!isResponderRoute || role === 'responder' || role === 'admin' || role === 'authority');
+
+          // Do not send a tourist back to a staff-only URL after an authority
+          // session expires or is replaced in another browser tab.
+          if (canUseRequestedRoute) {
+            router.replace(safeRedirect as any);
           } else if (role === 'admin' || role === 'authority') {
             router.replace('/authority');
           } else if (role === 'responder') {
@@ -53,36 +63,6 @@ function LoginFormContent() {
       })
       .catch(() => {});
   }, [router, redirect]);
-
-  const applyTouristPreset = async (presetId: string) => {
-    setTouristIdentifier(presetId);
-    setTouristLoading(true);
-    setTouristError(null);
-    try {
-      const res = await fetch('/api/auth/tourist-login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ identifier: presetId }),
-      });
-      const data = await res.json();
-      if (!data.success) {
-        setTouristError(data.error || 'Identity lookup failed.');
-        return;
-      }
-      router.push((redirect || '/citizen') as any);
-      router.refresh();
-    } catch (err: any) {
-      setTouristError(err.message || 'Connection error. Please try again.');
-    } finally {
-      setTouristLoading(false);
-    }
-  };
-
-  const applyStaffPreset = (presetEmail: string, presetPass: string) => {
-    setEmail(presetEmail);
-    setPassword(presetPass);
-    setStaffError(null);
-  };
 
   const handleStaffLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -116,7 +96,7 @@ function LoginFormContent() {
       const res = await fetch('/api/auth/tourist-login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ identifier: touristIdentifier }),
+        body: JSON.stringify({ identifier: touristIdentifier, recoveryAccessCode: touristRecoveryCode }),
       });
       const data = await res.json();
       if (!data.success) {
@@ -143,7 +123,7 @@ function LoginFormContent() {
       <main className="flex-1 flex items-center justify-center p-4 md:p-8">
         <div className="w-full max-w-md space-y-5">
           <div className="text-center space-y-2">
-            <h1 className="text-3xl font-semibold tracking-tight text-ink">Sign in to Prahari</h1>
+            <h1 className="ui-display text-3xl text-ink">Sign in to Prahari</h1>
             <p className="text-base text-ink-soft">Choose the access type that applies to you.</p>
           </div>
 
@@ -180,7 +160,7 @@ function LoginFormContent() {
                   </div>
                 )}
                 <div className="space-y-1.5">
-                  <label className="block font-bold uppercase tracking-wider text-[11px]">Official Government Email</label>
+                  <label className="block font-bold uppercase tracking-wider text-[11px]">Authority account email</label>
                   <div className="relative">
                     <Mail className="w-4 h-4 text-ink-soft absolute left-3 top-3 z-10" />
                     <input
@@ -205,18 +185,6 @@ function LoginFormContent() {
                   {staffLoading ? 'Verifying credentials…' : 'Sign in to authority desk'}
                 </button>
 
-                {/* Presets */}
-                <div className="pt-4 border-t-2 border-line space-y-2">
-                  <span className="text-[10px] uppercase tracking-wider text-ink-soft block text-center font-semibold">
-                    Demo access
-                  </span>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button type="button" onClick={() => applyStaffPreset('officer.sharma@police.gov.in', 'Officer@123')}
-                      className="minimal-button minimal-button-secondary text-[11px] !px-1">Authority</button>
-                    <button type="button" onClick={() => applyStaffPreset('unit17@dispatch.gov.in', 'Unit17@123')}
-                      className="minimal-button minimal-button-secondary text-[11px] !px-1">Unit #17</button>
-                  </div>
-                </div>
               </form>
             )}
 
@@ -231,30 +199,35 @@ function LoginFormContent() {
                 )}
                 <div className="space-y-1.5">
                   <label className="block font-bold uppercase tracking-wider text-[11px]">
-                    Decentralized Tourist ID (DID) or Tourist ID
+                    Digital Tourist ID (DID) or Tourist ID
                   </label>
                   <div className="relative">
                     <QrCode className="w-4 h-4 text-ink-soft absolute left-3 top-3 z-10" />
                     <input
-                      type="text" required placeholder="did:prahari:... or TOUR-7890"
+                      type="text" required placeholder="did:prahari:... or DTI-IND-..."
                       value={touristIdentifier} onChange={(e) => setTouristIdentifier(e.target.value)}
                       className="nb-input pl-9 font-mono text-xs"
                     />
                   </div>
                   <p className="text-[10px] text-ink-soft">
-                    Tourists verify using proof of DID credential ownership — no password required.
+                    Your ID identifies the record; it is not a secret.
                   </p>
                 </div>
-                <button type="submit" disabled={touristLoading} className="minimal-button minimal-button-primary w-full !py-3">
-                  {touristLoading ? 'Verifying ID…' : 'Open traveller safety hub'}
-                </button>
-                <div className="pt-4 border-t-2 border-line space-y-3">
-                  <button type="button" onClick={() => applyTouristPreset('TOUR-7890')}
-                    disabled={touristLoading}
-                    className="minimal-button minimal-button-secondary w-full text-xs">
-                    {touristLoading ? 'Verifying demo ID…' : <>Use demo traveller: <strong>TOUR-7890</strong></>}
-                  </button>
+                <div className="space-y-1.5">
+                  <label className="block font-bold uppercase tracking-wider text-[11px]">Onboarding recovery code</label>
+                  <div className="relative">
+                    <KeyRound className="w-4 h-4 text-ink-soft absolute left-3 top-3 z-10" />
+                    <input
+                      type="password" required placeholder="Saved during enrolment"
+                      value={touristRecoveryCode} onChange={(e) => setTouristRecoveryCode(e.target.value)}
+                      className="nb-input pl-9 font-mono text-xs"
+                    />
+                  </div>
+                  <p className="text-[10px] text-ink-soft">The code is shown once after verified onboarding and is stored server-side only as a salted verifier.</p>
                 </div>
+                <button type="submit" disabled={touristLoading} className="minimal-button minimal-button-primary w-full !py-3">
+                  {touristLoading ? 'Restoring session…' : 'Open traveller safety hub'}
+                </button>
               </form>
             )}
           </div>

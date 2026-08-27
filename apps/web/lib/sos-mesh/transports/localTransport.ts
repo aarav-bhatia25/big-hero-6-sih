@@ -1,8 +1,9 @@
 /**
  * Offline SOS Mesh — Local Queue Fallback Transport
  * 
- * Invoked when Internet, SMS, and BLE Relay are temporarily unreachable.
- * Safely persists the SOS packet into non-volatile IndexedDB storage and schedules background retries.
+ * Invoked when the Internet transport is temporarily unreachable.
+ * Persists the SOS packet into local IndexedDB storage and retries when this
+ * browser later receives an online event. IndexedDB is not device encryption.
  */
 
 import { SOSTransport, TransportResult } from './types';
@@ -26,7 +27,7 @@ export class LocalTransport implements SOSTransport {
       return {
         success: true,
         channel: 'LOCAL_QUEUE',
-        message: 'SOS securely stored in local encrypted queue. System will auto-retry delivery upon connectivity.',
+        message: 'SOS stored locally on this device. Prahari will retry delivery when this browser reconnects.',
         incidentId: packet.incidentId,
         transmittedAt: Date.now(),
       };

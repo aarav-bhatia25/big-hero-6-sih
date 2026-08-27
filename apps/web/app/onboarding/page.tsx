@@ -5,7 +5,12 @@ import Link from 'next/link';
 import {
   ArrowRight, ArrowLeft, CheckCircle2, AlertTriangle,
   Fingerprint, BookUser, Loader2, KeyRound, FlaskConical, Copy,
+  Camera, Sparkles,
 } from 'lucide-react';
+import OfflineAreaSetup from '@/components/offline/OfflineAreaSetup';
+import OfflineAreaDownload from '@/components/offline/OfflineAreaDownload';
+import type { OfflineMapSelection } from '@/lib/offlineMap';
+import { COMMUNICATION_LANGUAGES } from '@/lib/languages';
 
 type Method = 'aadhaar' | 'passport';
 type Step = 'method' | 'details' | 'otp' | 'consent' | 'done';
@@ -42,6 +47,12 @@ export default function OnboardingPage() {
     return date.toISOString().slice(0, 10);
   });
   const [itinerarySummary, setItinerarySummary] = useState('');
+  const [clothingPhoto, setClothingPhoto] = useState<File | null>(null);
+  const [clothingNotes, setClothingNotes] = useState('');
+  const [clothingConsent, setClothingConsent] = useState(false);
+  const [profileNotice, setProfileNotice] = useState<string | null>(null);
+  const [offlineMapSelection, setOfflineMapSelection] = useState<OfflineMapSelection | null>(null);
+  const [communicationLanguage, setCommunicationLanguage] = useState('en-IN');
 
   const [issued, setIssued] = useState<any | null>(null);
 
@@ -97,10 +108,15 @@ export default function OnboardingPage() {
     e.preventDefault();
     setBusy(true); setError(null);
     try {
+      if (clothingPhoto && !clothingConsent) {
+        setError('Please confirm that you consent to the photo being analysed for your emergency identification profile.');
+        return;
+      }
       const data = await post('/api/identity/issue', {
         sessionId,
         otp: method === 'aadhaar' ? otp : undefined,
         trackingConsent,
+        communicationLanguage,
         visitEndsAt: `${visitEndDate}T23:59:59.000Z`,
         itinerary: { summary: itinerarySummary, visitEndsAt: `${visitEndDate}T23:59:59.000Z` },
         ...(contactPhone || contactEmail
@@ -109,92 +125,114 @@ export default function OnboardingPage() {
         ...(hotel ? { accommodation: { hotelName: hotel, address: '', city: '' } } : {}),
       });
       if (!data.ok) { setError(data.error); return; }
+
+      setProfileNotice(null);
+      if (clothingPhoto || clothingNotes.trim()) {
+        const profileForm = new FormData();
+        if (clothingPhoto) profileForm.set('photo', clothingPhoto);
+        if (clothingNotes.trim()) profileForm.set('notes', clothingNotes.trim());
+
+        try {
+          const profileResponse = await fetch(`/api/tourists/${encodeURIComponent(data.touristId)}/clothing-profile`, {
+            method: 'POST',
+            body: profileForm,
+          });
+          const profileData = await profileResponse.json();
+          if (profileResponse.ok && profileData.success) {
+            data.clothingProfile = profileData.profile;
+          } else {
+            setProfileNotice(profileData.error || 'Your ID was issued, but the emergency identification profile could not be saved.');
+          }
+        } catch {
+          setProfileNotice('Your ID was issued, but the emergency identification profile could not be saved.');
+        }
+      }
       setIssued(data);
       setStep('done');
     } catch { setError('Could not issue the credential.'); }
     finally { setBusy(false); }
   }
 
-  const stepIndex = ['method', 'details', 'otp', 'consent', 'done'].indexOf(step);
+  const progressSteps = ['Identity', 'Verify', 'Consent', 'Issued'];
+  const activeProgressIndex = {
+    method: 0,
+    details: 0,
+    otp: 1,
+    consent: 2,
+    done: 3,
+  }[step];
+  const progressTracker = (
+    <ol className="onboarding-progress" aria-label="Onboarding progress">
+      {progressSteps.map((label, index) => {
+        const complete = index < activeProgressIndex;
+        const active = index === activeProgressIndex;
+        return (
+          <li key={label} className={`onboarding-progress-item ${complete ? 'is-complete' : ''} ${active ? 'is-active' : ''}`}>
+            <span className="onboarding-progress-marker">{complete ? <CheckCircle2 size={14} /> : index + 1}</span>
+            <span>{label}</span>
+          </li>
+        );
+      })}
+    </ol>
+  );
 
   return (
-    <main className="minimal-page min-h-screen">
-      <header className="minimal-nav">
-          <Link href="/" className="text-xl font-semibold tracking-tight text-ink">
-            Prahari
-          </Link>
-      </header>
+    <main className="onboarding-page">
+      <section className="onboarding-workspace">
+        <header className="onboarding-pane-header">
+          <Link href="/" className="onboarding-brand">Prahari</Link>
+          <span>Digital Tourist ID</span>
+        </header>
+        <div className="onboarding-content">
 
-      <div className="mx-auto max-w-4xl px-5 pb-16 pt-7 sm:px-8 sm:pt-10">
-
-        {/* Sandbox notice — must never be removed while the provider is simulated */}
-        <div className="onboarding-notice">
-          <FlaskConical className="mt-0.5 shrink-0" size={20} />
-          <div className="text-sm leading-6">
-            <strong className="block font-semibold">Demo verification</strong>
-            Aadhaar checksum and passport MRZ check digits are checked locally. Identity lookup is simulated; this is not UIDAI authentication and the credential is not government-recognised.
+        {step === 'method' && (
+          <div className="onboarding-intro">
+            <p className="minimal-eyebrow">Start your journey</p>
+            <h1 className="ui-display mt-3 text-3xl text-ink">Choose your verification path.</h1>
+            <p className="mt-3 max-w-md text-sm leading-6 text-ink-soft">
+              We only ask for the information needed to create your consent-based Digital Tourist ID.
+            </p>
           </div>
-        </div>
+        )}
 
-        <div className="mt-10 text-center">
-          <h1 className="text-4xl font-semibold tracking-tight text-ink">Travel safer, on your terms.</h1>
-          <p className="mx-auto mt-4 max-w-2xl text-base leading-7 text-ink-soft">
-            Create a consent-based, verifiable tourist credential. Your personal
-            information is shared only when you authorise it or during an active emergency.
-          </p>
-        </div>
-
-        {/* Progress */}
-        <div className="mx-auto mt-10 flex max-w-3xl items-center gap-2">
-          {['Identity', 'Verify', 'Consent', 'Issued'].map((label, i) => {
-            const reached = (step === 'otp' ? 1 : stepIndex > 1 ? stepIndex - 1 : stepIndex) >= i;
-            return (
-              <div key={label} className="flex flex-1 items-center gap-2">
-                <div className={`grid size-7 shrink-0 place-items-center rounded-full text-xs font-bold ${
-                  reached ? 'bg-brand-600 text-white' : 'bg-surface-2 text-ink-soft'}`}>
-                  {i + 1}
-                </div>
-                <span className={`text-xs font-semibold ${reached ? 'text-ink' : 'text-ink-soft'}`}>{label}</span>
-                {i < 3 && <div className={`h-px flex-1 ${reached ? 'bg-brand-600' : 'bg-surface-2'}`} />}
-              </div>
-            );
-          })}
-        </div>
+        {progressTracker}
 
         {error && (
-          <div className="mt-6 flex items-start gap-2 rounded-nb border border-red-300 bg-red-50 p-4 text-sm text-danger">
+          <div className="mb-6 flex items-start gap-2 rounded-nb border border-red-300 bg-red-50 p-4 text-sm text-danger">
             <AlertTriangle size={17} className="mt-0.5 shrink-0" /> <span>{error}</span>
           </div>
         )}
 
         {/* STEP 1 — method */}
         {step === 'method' && (
-          <div className="mt-8 grid gap-5 sm:grid-cols-2">
-            {([
-              { id: 'aadhaar' as const, icon: Fingerprint, title: 'Indian citizen', sub: 'Verify with Aadhaar + OTP' },
-              { id: 'passport' as const, icon: BookUser, title: 'Foreign national', sub: 'Verify with passport MRZ' },
-            ]).map(({ id, icon: Icon, title, sub }) => (
-              <button
-                key={id}
-                onClick={() => { setMethod(id); setStep('details'); setError(null); }}
-                className="minimal-card minimal-card-link p-8 text-left"
-              >
-                <div className="flex items-center gap-3">
-                  <Icon className="text-sky-400" size={25} />
-                  <h2 className="text-xl font-semibold text-ink">{title}</h2>
-                </div>
-                <p className="mt-4 text-base text-ink-soft">{sub}</p>
-                <span className="minimal-card-action">
-                  Continue <ArrowRight size={15} />
-                </span>
-              </button>
-            ))}
-          </div>
+          <section className="onboarding-stage">
+            <div className="space-y-3">
+              {([
+                { id: 'aadhaar' as const, icon: Fingerprint, title: 'Indian citizen', sub: 'Verify with Aadhaar + OTP' },
+                { id: 'passport' as const, icon: BookUser, title: 'Foreign national', sub: 'Verify with passport MRZ' },
+              ]).map(({ id, icon: Icon, title, sub }) => (
+                <button
+                  key={id}
+                  onClick={() => { setMethod(id); setStep('details'); setError(null); }}
+                  className="minimal-card minimal-card-link w-full p-5 text-left"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="grid size-10 place-items-center rounded-xl bg-surface-2 text-stone-700"><Icon size={20} /></span>
+                    <span>
+                      <span className="block text-base font-semibold text-ink">{title}</span>
+                      <span className="mt-1 block text-sm text-ink-soft">{sub}</span>
+                    </span>
+                  </div>
+                  <span className="minimal-card-action mt-4 text-sm">Continue <ArrowRight size={15} /></span>
+                </button>
+              ))}
+            </div>
+          </section>
         )}
 
         {/* STEP 2 — details */}
         {step === 'details' && (
-          <form onSubmit={handleInitiate} className="minimal-card mt-8 space-y-4 p-6 sm:p-8">
+          <form onSubmit={handleInitiate} className="onboarding-stage space-y-4">
             {method === 'aadhaar' ? (
               <>
                 <div>
@@ -258,7 +296,7 @@ export default function OnboardingPage() {
 
         {/* STEP 3 — OTP */}
         {step === 'otp' && (
-          <form onSubmit={handleOtp} className="minimal-card mt-8 space-y-4 p-6 sm:p-8">
+          <form onSubmit={handleOtp} className="onboarding-stage space-y-4">
             <div className="flex items-center gap-3">
               <KeyRound className="text-brand-600" size={22} />
               <div>
@@ -302,12 +340,18 @@ export default function OnboardingPage() {
 
         {/* STEP 4 — consent */}
         {step === 'consent' && (
-          <form onSubmit={handleIssue} className="minimal-card mt-8 space-y-4 p-6 sm:p-8">
+          <form onSubmit={handleIssue} className="onboarding-stage space-y-4">
             <div className="flex items-center gap-2 rounded-nb bg-emerald-50 px-4 py-3 text-sm font-semibold text-success">
               <CheckCircle2 size={17} /> Identity verified{fullName ? ` — ${fullName}` : ''}
             </div>
 
             <h2 className="pt-1 font-bold">Emergency contact <span className="font-normal text-ink-soft">(optional)</span></h2>
+            <label className="block text-sm font-semibold">Preferred authority communication language
+              <select value={communicationLanguage} onChange={(event) => setCommunicationLanguage(event.target.value)} className="nb-input mt-1 text-sm font-normal">
+                {COMMUNICATION_LANGUAGES.map((language) => <option key={language.code} value={language.code}>{language.label}</option>)}
+              </select>
+              <span className="mt-1 block text-xs font-normal text-ink-soft">Used to prepare translated emergency messages for the authority desk. You can still type in another language during an SOS.</span>
+            </label>
             <div className="grid gap-3 sm:grid-cols-3">
               <input value={contactName} onChange={(e) => setContactName(e.target.value)} placeholder="Contact name"
                 className="nb-input text-sm" />
@@ -328,6 +372,42 @@ export default function OnboardingPage() {
               </label>
             </div>
             <p className="text-xs text-ink-soft">Your credential automatically expires when this visit ends. Itinerary details remain off-chain.</p>
+
+            <section className="rounded-nb border-2 border-brand-600/20 bg-brand-50/60 p-4" aria-labelledby="emergency-profile-heading">
+              <div className="flex items-start gap-3">
+                <div className="grid size-9 shrink-0 place-items-center rounded-full bg-brand-600 text-white"><Camera size={18} /></div>
+                <div>
+                  <h2 id="emergency-profile-heading" className="font-bold text-ink">Emergency identification profile <span className="font-normal text-ink-soft">(optional)</span></h2>
+                  <p className="mt-1 text-xs leading-5 text-ink-soft">
+                    Upload a recent full-body photo or describe what you are wearing. AI creates a structured clothing description for authorised emergency and missing-person investigations. Your original photo is not retained.
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <label className="block text-xs font-semibold text-ink-soft">
+                  Current photo
+                  <input type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => setClothingPhoto(e.target.files?.[0] ?? null)}
+                    className="mt-1.5 block w-full text-xs file:mr-3 file:rounded-md file:border-0 file:bg-brand-600 file:px-3 file:py-2 file:text-xs file:font-bold file:text-white hover:file:bg-brand-700" />
+                  <span className="mt-1 block font-normal">JPEG, PNG, or WebP · up to 5 MB{clothingPhoto ? ` · ${clothingPhoto.name}` : ''}</span>
+                </label>
+                <label className="block text-xs font-semibold text-ink-soft">
+                  Clothing details
+                  <textarea value={clothingNotes} onChange={(e) => setClothingNotes(e.target.value)} maxLength={1000} rows={3}
+                    placeholder="e.g. blue rain jacket, black backpack, white trainers"
+                    className="nb-input mt-1.5 min-h-24 resize-y text-sm font-normal" />
+                </label>
+              </div>
+
+              {clothingPhoto && (
+                <label className="mt-3 flex cursor-pointer items-start gap-2 text-xs text-ink-soft">
+                  <input type="checkbox" checked={clothingConsent} onChange={(e) => setClothingConsent(e.target.checked)} className="mt-0.5 size-4 accent-brand-600" />
+                  <span>I consent to this photo being sent to OpenAI to generate my emergency clothing description. The photo itself will not be stored by Prahari.</span>
+                </label>
+              )}
+            </section>
+
+            <OfflineAreaSetup value={offlineMapSelection} onChange={setOfflineMapSelection} />
 
             <label className="flex cursor-pointer items-start gap-3 rounded-nb border-2 border-line bg-surface-2 p-4">
               <input type="checkbox" checked={trackingConsent} onChange={(e) => setTrackingConsent(e.target.checked)}
@@ -351,7 +431,7 @@ export default function OnboardingPage() {
 
         {/* STEP 5 — done */}
         {step === 'done' && issued && (
-          <div className="minimal-card mt-8 space-y-4 p-6 sm:p-8">
+          <div className="onboarding-stage space-y-4">
             <div className="flex items-center gap-3">
               <div className="grid size-11 place-items-center rounded-full bg-emerald-100 text-success">
                 <CheckCircle2 size={24} />
@@ -378,6 +458,31 @@ export default function OnboardingPage() {
               ))}
             </dl>
 
+            {issued.recoveryAccessCode && (
+              <div className="rounded-nb border border-amber-300 bg-amber-50 p-4 text-sm text-ink">
+                <p className="font-bold">Save your recovery code now</p>
+                <p className="mt-1 text-xs leading-5 text-ink-soft">It restores access to your traveller dashboard with your Digital Tourist ID. It will not be shown again and Prahari stores only a salted verifier.</p>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <code className="rounded border border-amber-300 bg-white px-2.5 py-2 font-mono text-xs text-ink break-all">{issued.recoveryAccessCode}</code>
+                  <button type="button" onClick={() => void navigator.clipboard?.writeText(issued.recoveryAccessCode)} className="minimal-button minimal-button-secondary px-3 py-2 text-xs"><Copy size={14} /> Copy code</button>
+                </div>
+              </div>
+            )}
+
+            {issued.clothingProfile && (
+              <div className="rounded-nb border border-brand-600/20 bg-brand-50/60 p-4 text-sm text-ink">
+                <p className="flex items-center gap-2 font-bold"><Sparkles size={16} className="text-brand-600" />Emergency identification profile ready</p>
+                <p className="mt-1.5 leading-6 text-ink-soft">{issued.clothingProfile.summary}</p>
+                <p className="mt-2 text-xs text-ink-soft">Available only to authorised responders during an emergency investigation.</p>
+              </div>
+            )}
+
+            {profileNotice && (
+              <div className="rounded-nb border border-amber-300 bg-amber-50 p-3 text-sm text-warning">{profileNotice}</div>
+            )}
+
+            <OfflineAreaDownload selection={offlineMapSelection} />
+
             <div className="flex flex-wrap gap-3">
               <Link href="/citizen"
                 className="minimal-button minimal-button-primary flex-1">
@@ -391,11 +496,24 @@ export default function OnboardingPage() {
           </div>
         )}
 
-        <p className="mt-6 flex justify-center gap-2 text-center text-xs text-ink-soft">
+        <p className="mt-8 flex gap-2 text-xs text-ink-soft">
           <CheckCircle2 size={15} className="text-success" /> You can revoke consent at any time.
         </p>
-      </div>
+        </div>
+
+        {/* This disclosure must remain visible while verification is simulated. */}
+        <footer className="onboarding-demo-note">
+          <FlaskConical size={16} className="shrink-0" />
+          <p><strong>Demo verification</strong>Aadhaar and passport checks are local; no UIDAI lookup is performed and this credential is not government-recognised.</p>
+        </footer>
+      </section>
+
+      <aside className="onboarding-visual" role="img" aria-label="A sunlit mountain trail with a safety beacon">
+        <div className="onboarding-visual-copy">
+          <p>Prahari safety network</p>
+          <h1>A safer path begins before you arrive.</h1>
+        </div>
+      </aside>
     </main>
   );
-}
 }

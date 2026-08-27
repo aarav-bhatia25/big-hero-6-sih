@@ -12,40 +12,7 @@ export { isSupabaseConfigured } from "./supabase";
 type Row = Record<string, any>;
 
 // In-memory fallback stores when Supabase is not configured or in fallback mode
-const inMemoryTourists = new Map<string, Row>([
-  [
-    'TOUR-7890',
-    {
-      touristId: 'TOUR-7890',
-      did: 'did:prahari:TOUR-7890',
-      name: 'Ralston Fernandes',
-      nationality: 'Indian',
-      identityStatus: 'verified',
-      emergencyContacts: [
-        { name: 'Ananya Sharma', phone: '+91 98765 43210', relationship: 'Sister' },
-      ],
-      accommodation: { hotelName: 'Heritage Palace Resort', address: 'Amer Road', city: 'Jaipur' },
-      preferences: { language: 'English', notificationMode: 'push', medicalNotes: 'No known allergies' },
-      trackingConsent: true,
-      createdAt: new Date().toISOString(),
-    },
-  ],
-  [
-    'DTI-IND-000123',
-    {
-      touristId: 'DTI-IND-000123',
-      did: 'did:tourist:DTI-IND-000123',
-      name: 'Demo Tourist',
-      nationality: 'India',
-      identityStatus: 'verified',
-      emergencyContacts: [
-        { name: 'Ananya Sharma', phone: '+91 98765 43210', relationship: 'Sister' },
-      ],
-      trackingConsent: true,
-      createdAt: new Date().toISOString(),
-    },
-  ],
-]);
+const inMemoryTourists = new Map<string, Row>();
 
 // Process-local storage is used only when no database is configured (for local
 // development). Once Supabase is configured, a database failure must never be
@@ -154,6 +121,15 @@ export async function insertGeofence(row: Row): Promise<Row | null> {
   return data;
 }
 
+/** Updates an authority-published boundary without delete-and-recreate loss. */
+export async function updateGeofence(id: string, fields: Row): Promise<Row | null> {
+  const sb = getSupabase();
+  if (!sb) return null;
+  const { data, error } = await sb.from("geofences").update(fields).eq("id", id).select().maybeSingle();
+  if (error) { console.warn("[prahari] updateGeofence:", error.message); return null; }
+  return data ?? null;
+}
+
 export async function replaceGeofences(rows: Row[]): Promise<boolean> {
   const sb = getSupabase();
   if (!sb) return false;
@@ -235,7 +211,20 @@ const KNOWN_INCIDENT_DB_COLUMNS = new Set([
   'assignedResponderName',
   'etaMinutes',
   'timeline',
+  'emergencyContactNotifications',
   'efirDraft',
+  'missingPersonDraft',
+  'transportType',
+  'hopCount',
+  'originalTimestamp',
+  'relayPath',
+  'originDeviceId',
+  'packetId',
+  'voiceStatement',
+  'voiceStatementLanguage',
+  'emergencyIdentificationProfile',
+  'emergencyIdentificationProfileSharedAt',
+  'incidentMessages',
   'resolvedAt',
   'cancelledAt',
   'cancelledBy',
@@ -254,6 +243,7 @@ function sanitizeIncidentRowForDb(row: Row): Row {
 
 export async function insertIncident(row: Row): Promise<boolean> {
   const fullRow = { createdAt: new Date().toISOString(), ...row };
+  const previous = inMemoryIncidents.get(row.incidentId);
   inMemoryIncidents.set(row.incidentId, fullRow);
   const sb = getSupabase();
   if (!sb) return true;
@@ -262,6 +252,9 @@ export async function insertIncident(row: Row): Promise<boolean> {
   const { error } = await sb.from("incidents").insert(sanitized);
   if (error) {
     console.warn("[prahari] insertIncident:", error.message);
+    if (previous) inMemoryIncidents.set(row.incidentId, previous);
+    else inMemoryIncidents.delete(row.incidentId);
+    return false;
   }
   return true;
 }
@@ -285,14 +278,19 @@ export async function upsertIncident(row: Row): Promise<boolean> {
 }
 
 export async function deleteIncident(incidentId: string): Promise<boolean> {
-  inMemoryIncidents.delete(incidentId);
   const sb = getSupabase();
-  if (!sb) return true;
-  const { error } = await sb.from("incidents").delete().eq("incidentId", incidentId);
+  if (!sb) {
+    if (!inMemoryIncidents.has(incidentId)) return false;
+    inMemoryIncidents.delete(incidentId);
+    return true;
+  }
+  const { data, error } = await sb.from("incidents").delete().eq("incidentId", incidentId).select("incidentId");
   if (error) {
     console.warn("[prahari] deleteIncident:", error.message);
     return false;
   }
+  if (!data?.length) return false;
+  inMemoryIncidents.delete(incidentId);
   return true;
 }
 
@@ -362,7 +360,8 @@ export async function getDashboardStats(): Promise<DashboardStats | null> {
 
 /** Partial update of an incident by its business key. */
 export async function updateIncident(incidentId: string, fields: Row): Promise<Row | null> {
-  let existing = inMemoryIncidents.get(incidentId);
+  const previous = inMemoryIncidents.get(incidentId);
+  let existing = previous;
   if (!existing) {
     existing = { incidentId, ...fields };
   } else {
@@ -381,11 +380,20 @@ export async function updateIncident(incidentId: string, fields: Row): Promise<R
 
     if (error) {
       console.warn("[prahari] updateIncident:", error.message);
+      if (previous) inMemoryIncidents.set(incidentId, previous);
+      else inMemoryIncidents.delete(incidentId);
+      return null;
     } else if (data) {
       return { ...updatedInMemory, ...data };
+    } else {
+      if (previous) inMemoryIncidents.set(incidentId, previous);
+      else inMemoryIncidents.delete(incidentId);
+      return null;
     }
   }
-  return updatedInMemory;
+  if (previous) inMemoryIncidents.set(incidentId, previous);
+  else inMemoryIncidents.delete(incidentId);
+  return null;
 }
 
 // ------------------------------------------------------------- kyc sessions

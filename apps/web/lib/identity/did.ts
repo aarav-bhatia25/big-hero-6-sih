@@ -12,6 +12,33 @@ function base58(buf: Buffer): string {
 }
 
 /**
+ * Decodes the multibase payload used by the credential proof. Leading zero
+ * bytes are significant for Ed25519 signatures, so each leading `1` restores
+ * one zero byte instead of being silently lost in the BigInt conversion.
+ */
+export function decodeBase58(value: string): Buffer | null {
+  let n = 0n;
+  for (const character of value) {
+    const index = B58.indexOf(character);
+    if (index < 0) return null;
+    n = n * 58n + BigInt(index);
+  }
+
+  let encoded = Buffer.alloc(0);
+  if (n > 0n) {
+    let hex = n.toString(16);
+    if (hex.length % 2) hex = `0${hex}`;
+    encoded = Buffer.from(hex, 'hex');
+  }
+  let leadingZeroes = 0;
+  for (const character of value) {
+    if (character !== '1') break;
+    leadingZeroes += 1;
+  }
+  return leadingZeroes ? Buffer.concat([Buffer.alloc(leadingZeroes), encoded]) : encoded;
+}
+
+/**
  * Deterministic DID from the salted subject hash.
  *
  * Deterministic matters: re-verifying the same document yields the same DID,

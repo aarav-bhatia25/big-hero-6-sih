@@ -1,74 +1,94 @@
 'use client';
 
+import Image from 'next/image';
 import Link from 'next/link';
-import { ArrowRight, MapPin, Radio } from 'lucide-react';
+import { ArrowUpRight, ArrowRight } from 'lucide-react';
+
+/* Photographic props framing the page corners — traveller kit down the left,
+   authority kit down the right. Decorative only; the centre column stays clear.
+   Sizes are tuned per-asset because these are tight cutouts with almost no
+   padding in frame, unlike the illustrations they replaced. */
+const ART = [
+  { src: '/hero/map-india.jpeg', className: 'art-map', w: 1103, h: 857 },
+  { src: '/hero/backpack.webp', className: 'art-backpack', w: 558, h: 549 },
+  { src: '/hero/passport.webp', className: 'art-passport', w: 236, h: 335 },
+  { src: '/hero/classified.webp', className: 'art-classified', w: 487, h: 598 },
+  { src: '/hero/badge.webp', className: 'art-badge', w: 307, h: 371 },
+  { src: '/hero/radio.webp', className: 'art-radio', w: 458, h: 490 },
+];
 
 export default function Home() {
   return (
-    <div className="minimal-page flex min-h-screen flex-col">
-      <header className="minimal-nav">
-        <Link href="/" className="text-xl font-semibold tracking-tight text-ink">
-          Prahari
-        </Link>
-        <div className="flex items-center gap-2 sm:gap-3">
-          <Link href="/login" className="minimal-text-link">Sign in</Link>
-          <Link href="/onboarding" className="minimal-button minimal-button-primary">Create ID <ArrowRight size={15} /></Link>
+    <div className="landing-shell">
+      <div className="landing-art" aria-hidden="true">
+        {ART.map((art) => (
+          <Image key={art.src} src={art.src} alt="" width={art.w} height={art.h} className={art.className} priority />
+        ))}
+      </div>
+
+      <nav className="landing-nav">
+        <Link href="/" className="landing-brand">Prahari</Link>
+        <div className="landing-nav-links">
+          <a href="#top">Home</a>
+          <a href="#roles">Who it&apos;s for</a>
+          <Link href="/login">Sign in</Link>
         </div>
-      </header>
+        <a href="#roles" className="landing-nav-cta">Get started <ArrowUpRight size={15} /></a>
+      </nav>
 
-      <main className="mx-auto w-full max-w-6xl flex-1 px-5 pb-20 pt-16 sm:pt-24">
-        <section className="mx-auto max-w-2xl text-center">
-          <h1 className="text-5xl font-semibold tracking-[-0.045em] text-ink sm:text-6xl">
-            Travel with a verified ID. Get help when it matters.
+      <main id="top" className="landing-main">
+        <section className="landing-hero">
+          <h1 className="landing-title">
+            Travel with a <strong>verified ID.</strong>
+            <br />
+            <em>Get help when it matters.</em>
           </h1>
-          <p className="mx-auto mt-6 max-w-xl text-base leading-7 text-ink-soft sm:text-lg">
-            Prahari gives travellers a digital safety ID, optional location sharing, and a direct emergency route to authorised responders.
+          <p className="landing-copy">
+            Prahari gives travellers a digital safety ID, optional location sharing,
+            and a direct emergency route to authorised responders.
           </p>
-          <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
-            <Link href="/onboarding" className="minimal-button minimal-button-primary minimal-button-large">
-              Create a tourist ID <ArrowRight size={18} />
-            </Link>
-            <Link href="/login" className="minimal-button minimal-button-secondary minimal-button-large">
-              Sign in to Prahari
-            </Link>
-          </div>
-          <p className="mt-5 text-sm text-ink-soft">Mock KYC · Sepolia testnet · Location sharing is opt-in</p>
         </section>
 
-        <section className="mx-auto mt-16 grid max-w-5xl gap-5 md:grid-cols-2">
-          <Link href="/onboarding" className="minimal-card minimal-card-link group">
-            <div className="flex items-center gap-3 text-sky-400">
-              <MapPin size={24} strokeWidth={2} aria-hidden="true" />
-              <h2 className="text-2xl font-semibold tracking-tight text-ink">For travellers</h2>
-            </div>
-            <p className="mt-4 max-w-md text-base leading-7 text-ink-soft">
-              Create a digital tourist ID, keep emergency contacts on file, and use SOS when you need help.
+        <section id="roles" className="landing-roles" aria-label="Choose your portal">
+          <article className="role-card role-card-traveller">
+            <h2>For travellers.</h2>
+            <p>
+              Create a digital tourist ID, keep emergency contacts on file, and reach help
+              without exposing more location data than necessary.
             </p>
-            <span className="minimal-card-action">Start onboarding <ArrowRight size={16} /></span>
-          </Link>
-
-          <Link href="/authority" className="minimal-card minimal-card-link group">
-            <div className="flex items-center gap-3 text-sky-400">
-              <Radio size={24} strokeWidth={2} aria-hidden="true" />
-              <h2 className="text-2xl font-semibold tracking-tight text-ink">For authorised staff</h2>
+            <div className="role-actions">
+              <Link href="/onboarding" className="role-btn-primary">
+                Create tourist ID <ArrowUpRight size={16} />
+              </Link>
+              <Link href="/login?role=tourist" className="role-btn-secondary">
+                Log in as traveller <ArrowRight size={16} />
+              </Link>
             </div>
-            <p className="mt-4 max-w-md text-base leading-7 text-ink-soft">
-              Review live incidents, safety signals, geofences, and verified traveller credentials.
-            </p>
-            <span className="minimal-card-action">Open authority desk <ArrowRight size={16} /></span>
-          </Link>
-        </section>
+          </article>
 
-        <section className="mx-auto mt-14 grid max-w-5xl gap-6 border-y border-line py-7 text-base text-ink-soft sm:grid-cols-3">
-          <div><strong className="block text-ink">Consent first</strong><span className="mt-1 block">Location sharing can be disabled by the traveller.</span></div>
-          <div><strong className="block text-ink">Human review</strong><span className="mt-1 block">Safety signals support investigation; they do not make decisions.</span></div>
-          <div><strong className="block text-ink">Privacy-preserving ID</strong><span className="mt-1 block">Only a credential commitment is anchored on-chain.</span></div>
+          <div className="divider-or" aria-hidden="true"><span>OR</span></div>
+
+          <article className="role-card role-card-authority">
+            <h2>For authorised staff.</h2>
+            <p>
+              Review live incidents, safety signals, geofences, and verified traveller
+              credentials from one operational desk.
+            </p>
+            <div className="role-actions">
+              <Link href="/authority" className="role-btn-primary">
+                Open authority desk <ArrowUpRight size={16} />
+              </Link>
+              <Link href="/login?role=staff" className="role-btn-secondary">
+                Log in as authority <ArrowRight size={16} />
+              </Link>
+            </div>
+          </article>
         </section>
       </main>
 
-      <footer className="minimal-footer">
-        <span>Prahari demonstration platform</span>
-        <a href="tel:112" className="font-medium text-ink hover:underline">Emergency: 112</a>
+      <footer className="landing-footer">
+        <span>© 2026 Prahari</span>
+        <a href="tel:112">Emergency: 112</a>
       </footer>
     </div>
   );

@@ -18,9 +18,11 @@ import {
 } from '../sosPacket';
 
 import { SOSStateMachine } from '../sosStateMachine';
-import { hasSeenPacket, markPacketAsSeen, saveQueuedPacket } from '../indexedDbQueue';
+import { getPendingQueuedPackets, hasSeenPacket, markPacketAsSeen, saveQueuedPacket } from '../indexedDbQueue';
 import { InternetTransport } from '../transports/internetTransport';
 import { LocalTransport } from '../transports/localTransport';
+import { BleTransport, encodeBleRelayFrames, PRAHARI_BLE_RELAY_SERVICE_UUID, PRAHARI_BLE_RELAY_WRITE_UUID } from '../transports/bleTransport';
+import { SOSTransportManager } from '../transports/transportManager';
 
 describe('Offline SOS Mesh — Packet Suite', () => {
   test('should create valid SOS packet with defaults', () => {
@@ -69,6 +71,68 @@ describe('Offline SOS Mesh — Packet Suite', () => {
     assert.strictEqual(restored?.packetId, original.packetId);
     assert.strictEqual(restored?.touristId, original.touristId);
   });
+
+  test('should frame a BLE relay packet within the baseline GATT write size', () => {
+    const packet = createSOSPacket({ touristId: 'TOUR-1', latitude: 19.0, longitude: 72.0 });
+    const frames = encodeBleRelayFrames(packet);
+    assert.ok(frames.length > 1);
+    assert.ok(frames.every((frame) => frame.length <= 20));
+    assert.ok(frames.every((frame, index) => frame[0] === 0x50 && frame[1] === 0x52 && frame[2] === 1 && frame[4] === index));
+  });
+
+  test('should write every SOS frame to a paired gateway and retain BLE provenance for later uplink', async () => {
+    const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    const writes: Uint8Array[] = [];
+    let connected = false;
+    const characteristic = {
+      writeValueWithResponse: async (value: BufferSource) => {
+        writes.push(new Uint8Array(value as ArrayBuffer));
+      },
+    };
+    const device = {
+      name: 'Prahari test gateway',
+      gatt: {
+        get connected() { return connected; },
+        async connect() {
+          connected = true;
+          return {
+            async getPrimaryService(service: string) {
+              assert.strictEqual(service, PRAHARI_BLE_RELAY_SERVICE_UUID);
+              return {
+                async getCharacteristic(characteristicId: string) {
+                  assert.strictEqual(characteristicId, PRAHARI_BLE_RELAY_WRITE_UUID);
+                  return characteristic;
+                },
+              };
+            },
+          };
+        },
+        disconnect() { connected = false; },
+      },
+      addEventListener() {},
+    };
+    Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
+      value: { bluetooth: { requestDevice: async () => device } },
+    });
+
+    try {
+      const packet = createSOSPacket({ touristId: 'TOUR-BLE', latitude: 19.0, longitude: 72.0 });
+      const transport = new BleTransport();
+      const paired = await transport.pairGateway();
+      assert.strictEqual(paired.paired, true);
+      const result = await transport.send(packet);
+      assert.strictEqual(result.success, true);
+      assert.ok(writes.length > 1);
+      assert.ok(writes.every((frame) => frame.length <= 20));
+      const queued = (await getPendingQueuedPackets()).find((record) => record.packetId === packet.packetId);
+      assert.strictEqual(queued?.status, 'RELAYED');
+      assert.strictEqual(queued?.packet.lastKnownTransport, 'BLE_RELAY');
+    } finally {
+      if (originalNavigator) Object.defineProperty(globalThis, 'navigator', originalNavigator);
+      else delete (globalThis as { navigator?: unknown }).navigator;
+    }
+  });
 });
 
 describe('Offline SOS Mesh — State Machine & Loop Guard', () => {
@@ -108,5 +172,75 @@ describe('Offline SOS Mesh — State Machine & Loop Guard', () => {
 
     assert.strictEqual(res.success, true);
     assert.strictEqual(res.channel, 'LOCAL_QUEUE');
+  });
+});
+
+describe('SOS delivery independence from BLE', () => {
+  test('delivers directly over Internet without loading the optional BLE transport', async () => {
+    class DirectInternetTransport extends InternetTransport {
+      calls = 0;
+      async send(packet: ReturnType<typeof createSOSPacket>) {
+        this.calls += 1;
+        return { success: true as const, channel: 'INTERNET' as const, incidentId: packet.incidentId, message: 'Recorded directly.' };
+      }
+    }
+    class UnusedLocalTransport extends LocalTransport {
+      calls = 0;
+      async send(packet: ReturnType<typeof createSOSPacket>) {
+        this.calls += 1;
+        return super.send(packet);
+      }
+    }
+
+    const internet = new DirectInternetTransport();
+    const local = new UnusedLocalTransport();
+    let bleWasLoaded = false;
+    const manager = new SOSTransportManager({
+      internetTransport: internet,
+      localTransport: local,
+      loadBleTransport: async () => {
+        bleWasLoaded = true;
+        return null;
+      },
+    });
+
+    const result = await manager.dispatch(createSOSPacket({ touristId: 'TOUR-WIFI', latitude: 19.07, longitude: 72.88 }));
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(result.channel, 'INTERNET');
+    assert.strictEqual(internet.calls, 1);
+    assert.strictEqual(local.calls, 0);
+    assert.strictEqual(bleWasLoaded, false);
+  });
+
+  test('falls back to the local retry queue without loading BLE when internet is unavailable', async () => {
+    class OfflineInternetTransport extends InternetTransport {
+      async send() {
+        return { success: false as const, channel: 'INTERNET' as const, error: 'No internet connection.' };
+      }
+    }
+    class QueueTransport extends LocalTransport {
+      calls = 0;
+      async send(packet: ReturnType<typeof createSOSPacket>) {
+        this.calls += 1;
+        return { success: true as const, channel: 'LOCAL_QUEUE' as const, incidentId: packet.incidentId };
+      }
+    }
+
+    const local = new QueueTransport();
+    let bleWasLoaded = false;
+    const manager = new SOSTransportManager({
+      internetTransport: new OfflineInternetTransport(),
+      localTransport: local,
+      loadBleTransport: async () => {
+        bleWasLoaded = true;
+        return null;
+      },
+    });
+
+    const result = await manager.dispatch(createSOSPacket({ touristId: 'TOUR-QUEUE', latitude: 28.61, longitude: 77.2 }));
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(result.channel, 'LOCAL_QUEUE');
+    assert.strictEqual(local.calls, 1);
+    assert.strictEqual(bleWasLoaded, false);
   });
 });

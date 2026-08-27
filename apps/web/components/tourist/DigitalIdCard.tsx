@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Image from 'next/image';
-import { QrCode, UserCheck, FlaskConical, AlertTriangle, Link2 } from 'lucide-react';
+import { QrCode, UserCheck, FlaskConical, AlertTriangle, Link2, LockKeyhole, ShieldCheck } from 'lucide-react';
 import { generateDigitalIdQr } from '@/lib/services/digitalId';
 
 export interface DigitalIdTourist {
@@ -42,7 +42,9 @@ export default function DigitalIdCard({ tourist }: { tourist: DigitalIdTourist |
 
   useEffect(() => {
     if (!did) { setQrCodeUrl(''); return; }
-    const payload = tourist?.credentialHash ? `${did}?h=${tourist.credentialHash}` : did;
+    const verificationUrl = new URL(`/verify/${encodeURIComponent(did)}`, window.location.origin);
+    if (tourist?.credentialHash) verificationUrl.searchParams.set('h', tourist.credentialHash);
+    const payload = verificationUrl.toString();
     generateDigitalIdQr(payload).then(setQrCodeUrl).catch(console.error);
   }, [did, tourist?.credentialHash]);
 
@@ -132,12 +134,8 @@ export default function DigitalIdCard({ tourist }: { tourist: DigitalIdTourist |
           ) : (
             <div className="w-44 h-44 flex items-center justify-center text-ink-soft text-xs">Generating QR...</div>
           )}
-          <p className="text-xs font-mono text-ink mt-2 font-bold text-center tracking-wider break-all max-w-xs">
-            {did}
-          </p>
           <p className="text-[11px] text-ink-soft text-center mt-1 max-w-sm">
-            W3C Verifiable Credential. Authorised personnel scan this to verify identity and confirm
-            the credential has not been tampered with.
+            Scan opens a verification link with this credential’s cryptographic claim hash. It confirms active status without placing your profile, emergency contacts, or location in the QR code.
           </p>
         </div>
       ) : (
@@ -156,6 +154,23 @@ export default function DigitalIdCard({ tourist }: { tourist: DigitalIdTourist |
           </div>
         </div>
       )}
+
+      <div className="mt-4 rounded-xl border border-line bg-surface-2 p-4">
+        <div className="flex items-start gap-3">
+          <LockKeyhole className="mt-0.5 shrink-0 text-sky-400" size={19} />
+          <div>
+            <h4 className="font-semibold text-ink">Consent-based identity design</h4>
+            <p className="mt-1 text-xs leading-5 text-ink-soft">
+              The card is for you to show. A scan checks the signed credential and status; full emergency details remain off-chain and are available only to signed-in, authorised staff in an active case workflow.
+            </p>
+          </div>
+        </div>
+        <div className="mt-3 grid gap-2 text-xs sm:grid-cols-3">
+          <p className="rounded-lg border border-line p-2.5 text-ink-soft"><ShieldCheck className="mr-1 inline size-3.5 text-success" />Ed25519-signed credential</p>
+          <p className="rounded-lg border border-line p-2.5 text-ink-soft"><Link2 className="mr-1 inline size-3.5 text-success" />Hash-only chain anchor</p>
+          <p className="rounded-lg border border-line p-2.5 text-ink-soft"><LockKeyhole className="mr-1 inline size-3.5 text-success" />Expiry and revocation checked</p>
+        </div>
+      </div>
     </section>
   );
 }

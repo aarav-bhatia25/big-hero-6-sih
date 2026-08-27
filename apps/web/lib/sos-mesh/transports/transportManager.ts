@@ -1,141 +1,151 @@
 /**
- * Offline SOS Mesh — Transport Manager
- * 
- * Central coordinator selecting the best available transport channel based on priority:
- * 1. Internet Transport (REST API)
- * 2. SMS Transport (Cellular fallback)
- * 3. BLE Relay Transport (Peer-to-peer mesh)
- * 4. Local Queue Transport (IndexedDB store-and-forward)
- * 
- * Listens for network restoration to automatically flush and deliver queued offline packets.
+ * SOS delivery coordinator.
+ *
+ * Internet is the complete, primary path. BLE is never loaded or queried while
+ * that path works; it is an explicit, optional offline relay. If neither is
+ * available, the packet is held in this browser's retry queue.
  */
 
-import { SOSTransport, TransportResult, TransportChannel } from './types';
+import type { SOSTransport, TransportResult } from './types';
 import { InternetTransport } from './internetTransport';
-import { BleTransport } from './bleTransport';
 import { LocalTransport } from './localTransport';
 import { SOSPacket } from '../sosPacket';
 import { globalSOSStateMachine } from '../sosStateMachine';
 import { getPendingQueuedPackets, updateQueuedPacketStatus } from '../indexedDbQueue';
 
+type BleTransportLoader = () => Promise<SOSTransport | null>;
+
+export type SOSTransportManagerDependencies = {
+  internetTransport?: InternetTransport;
+  localTransport?: LocalTransport;
+  loadBleTransport?: BleTransportLoader;
+};
+
+const loadOptionalBleTransport: BleTransportLoader = async () => {
+  const { globalBleTransport } = await import('./bleTransport');
+  return globalBleTransport;
+};
+
 export class SOSTransportManager {
-  private transports: SOSTransport[];
+  private readonly internetTransport: InternetTransport;
+  private readonly localTransport: LocalTransport;
+  private readonly loadBleTransport: BleTransportLoader;
   private isProcessingQueue = false;
 
-  constructor() {
-    this.transports = [
-      new InternetTransport(),
-      new BleTransport(),
-      new LocalTransport(),
-    ];
+  constructor(dependencies: SOSTransportManagerDependencies = {}) {
+    this.internetTransport = dependencies.internetTransport ?? new InternetTransport();
+    this.localTransport = dependencies.localTransport ?? new LocalTransport();
+    this.loadBleTransport = dependencies.loadBleTransport ?? loadOptionalBleTransport;
 
     if (typeof window !== 'undefined') {
       window.addEventListener('online', () => {
-        console.log('[SOSTransportManager] Network online event detected! Flushing queued SOS packets...');
         void this.flushQueuedPackets();
       });
     }
   }
 
-  /**
-   * Dispatches an emergency packet using the best available transport channel.
-   */
-  public async dispatch(packet: SOSPacket): Promise<TransportResult> {
-    globalSOSStateMachine.transitionTo('TRY_INTERNET', {
-      incidentId: packet.incidentId,
-      message: 'Evaluating available transport channels for SOS delivery...',
-    });
-
-    for (const transport of this.transports) {
-      const isAvail = await transport.isAvailable();
-      if (!isAvail) continue;
-
-      if (transport.name === 'INTERNET') {
-        globalSOSStateMachine.transitionTo('TRY_INTERNET', { incidentId: packet.incidentId });
-      } else if (transport.name === 'BLE_RELAY') {
-        globalSOSStateMachine.transitionTo('TRY_BLE_RELAY', { incidentId: packet.incidentId });
-      }
-
-      console.log(`[SOSTransportManager] Attempting delivery via channel: ${transport.name}`);
-      const result = await transport.send(packet);
-
-      if (result.success) {
-        if (result.channel === 'INTERNET') {
-          globalSOSStateMachine.transitionTo('DELIVERED', {
-            incidentId: packet.incidentId,
-            transport: 'INTERNET',
-            message: result.message || 'SOS delivered to police backend via internet.',
-          });
-        } else if (result.channel === 'BLE_RELAY') {
-          globalSOSStateMachine.transitionTo('RELAYED', {
-            incidentId: packet.incidentId,
-            transport: 'BLE_RELAY',
-            hopCount: packet.hopCount + 1,
-            message: result.message || 'SOS transmitted to nearby relay device.',
-          });
-        } else if (result.channel === 'LOCAL_QUEUE') {
-          globalSOSStateMachine.transitionTo('LOCAL_PERSISTED', {
-            incidentId: packet.incidentId,
-            transport: 'LOCAL_QUEUE',
-            message: result.message || 'SOS safely saved in local offline queue.',
-          });
-        }
-        return result;
-      }
-
-      console.warn(`[SOSTransportManager] Delivery failed on channel ${transport.name}:`, result.error);
+  private async tryTransport(transport: SOSTransport, packet: SOSPacket): Promise<TransportResult | null> {
+    try {
+      if (!await transport.isAvailable()) return null;
+      return await transport.send(packet);
+    } catch (error: any) {
+      return {
+        success: false,
+        channel: transport.name,
+        error: error?.message || `${transport.name} transport failed unexpectedly.`,
+      };
     }
+  }
 
-    // Ultimate fallback: save locally
-    const localTransport = this.transports.find((t) => t.name === 'LOCAL_QUEUE') as LocalTransport;
-    const fallbackResult = await localTransport.send(packet);
-
-    globalSOSStateMachine.transitionTo('LOCAL_PERSISTED', {
+  private markDelivered(packet: SOSPacket, result: TransportResult): TransportResult {
+    globalSOSStateMachine.transitionTo('DELIVERED', {
       incidentId: packet.incidentId,
-      transport: 'LOCAL_QUEUE',
-      message: 'No active channels reached; packet secured in local queue.',
+      transport: 'INTERNET',
+      message: result.message || 'SOS recorded directly in the Prahari authority queue via Internet.',
     });
-
-    return fallbackResult;
+    return result;
   }
 
   /**
-   * Flushes all stored offline packets to the server when internet returns.
+   * Sends an SOS directly over the authenticated web API first. `allowBleRelay`
+   * defaults to false so a traveller must deliberately set up the optional
+   * gateway; Wi-Fi delivery and offline local retry require no BLE support.
    */
+  public async dispatch(packet: SOSPacket, { allowBleRelay = false }: { allowBleRelay?: boolean } = {}): Promise<TransportResult> {
+    globalSOSStateMachine.transitionTo('TRY_INTERNET', {
+      incidentId: packet.incidentId,
+      message: 'Sending SOS directly to the Prahari authority queue…',
+    });
+
+    const internetResult = await this.tryTransport(this.internetTransport, packet);
+    if (internetResult?.success) return this.markDelivered(packet, internetResult);
+
+    if (allowBleRelay) {
+      try {
+        const bleTransport = await this.loadBleTransport();
+        if (bleTransport) {
+          globalSOSStateMachine.transitionTo('TRY_BLE_RELAY', { incidentId: packet.incidentId });
+          const bleResult = await this.tryTransport(bleTransport, packet);
+          if (bleResult?.success) {
+            globalSOSStateMachine.transitionTo('RELAYED', {
+              incidentId: packet.incidentId,
+              transport: 'BLE_RELAY',
+              hopCount: packet.hopCount,
+              message: bleResult.message || 'SOS accepted by the optional BLE relay gateway.',
+            });
+            return bleResult;
+          }
+        }
+      } catch {
+        // BLE is optional. A missing API, unsupported browser, or gateway error
+        // must never prevent the durable local fallback.
+      }
+    }
+
+    const localResult = await this.tryTransport(this.localTransport, packet);
+    if (localResult?.success) {
+      globalSOSStateMachine.transitionTo('LOCAL_PERSISTED', {
+        incidentId: packet.incidentId,
+        transport: 'LOCAL_QUEUE',
+        message: localResult.message || 'SOS saved locally and will retry when this browser reconnects.',
+      });
+      return localResult;
+    }
+
+    globalSOSStateMachine.transitionTo('DELIVERY_FAILED', {
+      incidentId: packet.incidentId,
+      message: localResult?.error || internetResult?.error || 'SOS could not be delivered or saved locally.',
+    });
+    return localResult ?? internetResult ?? {
+      success: false,
+      channel: 'LOCAL_QUEUE',
+      error: 'SOS could not be delivered or saved locally.',
+    };
+  }
+
+  /** Flushes browser-stored offline packets as soon as the web connection returns. */
   public async flushQueuedPackets(): Promise<{ processed: number; succeeded: number }> {
     if (this.isProcessingQueue) return { processed: 0, succeeded: 0 };
     this.isProcessingQueue = true;
 
     try {
-      const internetTransport = this.transports.find((t) => t.name === 'INTERNET') as InternetTransport;
-      const isOnline = await internetTransport.isAvailable();
-      if (!isOnline) {
-        this.isProcessingQueue = false;
-        return { processed: 0, succeeded: 0 };
-      }
-
       const pendingRecords = await getPendingQueuedPackets();
       let succeeded = 0;
 
       for (const record of pendingRecords) {
-        console.log(`[SOSTransportManager] Flushing queued packet: ${record.packetId}`);
-        const res = await internetTransport.send(record.packet);
-        if (res.success) {
+        const result = await this.tryTransport(this.internetTransport, record.packet);
+        if (result?.success) {
           await updateQueuedPacketStatus(record.packetId, 'DELIVERED');
-          succeeded++;
-          globalSOSStateMachine.transitionTo('DELIVERED', {
-            incidentId: record.packet.incidentId,
-            transport: 'INTERNET',
-            message: 'Queued offline SOS delivered upon network restoration.',
-          });
+          succeeded += 1;
+          this.markDelivered(record.packet, result);
         } else {
-          await updateQueuedPacketStatus(record.packetId, record.status, res.error);
+          await updateQueuedPacketStatus(record.packetId, record.status, result?.error || 'Internet is still unavailable.');
         }
       }
 
       return { processed: pendingRecords.length, succeeded };
-    } catch (err) {
-      console.error('[SOSTransportManager] Error flushing queued packets:', err);
+    } catch (error) {
+      console.error('[SOSTransportManager] Unable to flush the local SOS queue:', error);
       return { processed: 0, succeeded: 0 };
     } finally {
       this.isProcessingQueue = false;

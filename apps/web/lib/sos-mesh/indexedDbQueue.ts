@@ -1,12 +1,14 @@
 /**
- * Offline SOS Mesh — IndexedDB Persistent Emergency Queue & Deduplication Store
+ * Offline SOS IndexedDB queue and duplicate-prevention store.
  * 
  * Ensures emergency SOS packets survive page refreshes, tab closures, and browser restarts.
- * Also stores seen packet IDs for duplicate prevention across BLE mesh hops.
+ * Also stores seen packet IDs for duplicate prevention across relay attempts.
  */
 
 import { SOSPacket, isValidSOSPacket, isPacketExpired } from './sosPacket';
 
+// Keep the existing on-device database name so any already queued SOS is not
+// stranded by this terminology change.
 const DB_NAME = 'Prahari_SOS_Mesh_DB';
 const DB_VERSION = 2;
 const PACKET_STORE = 'sos_packets';
@@ -268,7 +270,7 @@ export async function removeQueuedPacket(packetId: string): Promise<boolean> {
 }
 
 /**
- * Persists a two-way emergency mesh chat packet in local IndexedDB.
+ * Persists an emergency chat packet in local IndexedDB while it awaits sync.
  */
 export async function saveChatMessage(packet: SOSPacket): Promise<boolean> {
   const existingIdx = memoryChatMessages.findIndex((m) => m.packetId === packet.packetId);

@@ -11,7 +11,6 @@ export type SOSState =
   | 'PACKET_CREATED'
   | 'LOCAL_PERSISTED'
   | 'TRY_INTERNET'
-  | 'TRY_SMS'
   | 'TRY_BLE_RELAY'
   | 'RELAYED'
   | 'DELIVERED'
@@ -27,7 +26,7 @@ export interface SOSStateChangeEvent {
   timestamp: number;
   message?: string;
   incidentId?: string;
-  transport?: 'INTERNET' | 'SMS' | 'BLE_RELAY' | 'LOCAL_QUEUE';
+  transport?: 'INTERNET' | 'BLE_RELAY' | 'LOCAL_QUEUE';
   hopCount?: number;
 }
 
@@ -55,7 +54,7 @@ export class SOSStateMachine {
     meta?: {
       message?: string;
       incidentId?: string;
-      transport?: 'INTERNET' | 'SMS' | 'BLE_RELAY' | 'LOCAL_QUEUE';
+      transport?: 'INTERNET' | 'BLE_RELAY' | 'LOCAL_QUEUE';
       hopCount?: number;
     }
   ): SOSStateChangeEvent {

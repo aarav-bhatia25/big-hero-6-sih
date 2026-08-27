@@ -29,10 +29,10 @@ export default function IncidentQueue({ incidents, selectedIncidentId, onSelectI
     <section className="minimal-card h-full p-5 sm:p-6">
       <div className="flex items-start justify-between gap-3 border-b border-line pb-5">
         <div>
-          <h2 className="flex items-center gap-2 text-lg font-semibold text-ink"><CircleAlert size={19} className="text-rose-300" />Open incidents</h2>
+          <h2 className="flex items-center gap-2 text-lg font-semibold text-ink"><CircleAlert size={19} className="text-rose-600" />Open incidents</h2>
           <p className="mt-1 text-sm text-ink-soft">{incidents.length} current report{incidents.length === 1 ? '' : 's'}</p>
         </div>
-        <span className="rounded-full border border-rose-400/35 px-2.5 py-1 text-xs font-medium text-rose-200">Live</span>
+        <span className="rounded-full border border-rose-600/25 bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700">Live</span>
       </div>
 
       {incidents.length === 0 ? (
@@ -47,28 +47,28 @@ export default function IncidentQueue({ incidents, selectedIncidentId, onSelectI
           {incidents.map((incident) => {
             const selected = selectedIncidentId === incident.incidentId;
             const critical = String(incident.severity ?? '').toLowerCase() === 'critical';
-            const isMeshRelay = incident.transportType === 'BLE_RELAY' || Boolean(incident.hopCount && incident.hopCount > 0);
+            const isBleRelay = incident.transportType === 'BLE_RELAY';
             return (
               <button
                 type="button"
                 key={incident.id ?? incident.incidentId}
                 onClick={() => onSelectIncident(incident)}
-                className={`w-full rounded-xl border p-4 text-left transition ${selected ? 'border-sky-400/70 bg-sky-400/10' : 'border-slate-700/80 bg-slate-900/25 hover:border-slate-500'}`}
+                className={`w-full rounded-xl border p-4 text-left transition ${selected ? 'border-stone-400 bg-stone-50' : 'border-line bg-surface hover:border-stone-300'}`}
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <AlertTriangle size={16} className={critical ? 'text-rose-300' : 'text-amber-300'} />
+                      <AlertTriangle size={16} className={critical ? 'text-rose-600' : 'text-amber-600'} />
                       <span className="truncate font-mono text-sm font-semibold text-ink">{incident.incidentId}</span>
-                      {isMeshRelay && (
-                        <span className="rounded-full bg-sky-500/20 px-2 py-0.5 font-mono text-[10px] font-bold text-sky-300 border border-sky-400/30">
-                          BLE RELAY ({incident.hopCount ?? 1} Hops)
+                      {isBleRelay && (
+                        <span className="rounded-full border border-stone-300 bg-stone-100 px-2 py-0.5 font-mono text-[10px] font-bold text-stone-700">
+                          BLE GATEWAY RELAY
                         </span>
                       )}
                     </div>
                     <p className="mt-2 truncate text-sm text-ink-soft">{incident.touristName ?? incident.touristId ?? 'Traveller not recorded'}</p>
                   </div>
-                  <span className="rounded-md bg-slate-800 px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-slate-300">{incident.type ?? 'Report'}</span>
+                  <span className="rounded-md bg-surface-2 px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-ink-soft">{incident.type ?? 'Report'}</span>
                 </div>
                 <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-soft">
                   <span>{incident.assignedResponderUnitId ? `Assigned: ${incident.assignedResponderUnitId}` : 'Unassigned'}</span>

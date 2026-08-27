@@ -7,8 +7,8 @@ import { ethers } from "ethers";
  * env vars at Sepolia (Alchemy RPC + a funded key) to go public — no code change.
  *
  * Every function degrades gracefully: if the chain is not configured or is
- * unreachable it returns null, exactly like the ML client, so credential
- * issuance never fails just because anchoring is unavailable.
+ * unreachable it returns null, so credential issuance never fails just
+ * because anchoring is unavailable.
  */
 
 const ABI = [
@@ -20,9 +20,24 @@ const ABI = [
   "event CredentialRegistered(bytes32 indexed credentialHash, address indexed issuer, uint64 issuedAt, uint64 expiresAt)",
 ];
 
-const RPC = process.env.CHAIN_RPC_URL;
-const ADDR = process.env.IDENTITY_REGISTRY_ADDRESS;
-const KEY = process.env.ANCHOR_PRIVATE_KEY;
+/**
+ * Local development can use the Hardhat anchor variables.  When a funded
+ * deployment key is configured, writes must instead target the deployed
+ * Sepolia registry — never the local Hardhat account/address left in an
+ * app-specific `.env.local`.
+ */
+const DEPLOYER_KEY = process.env.DEPLOYER_PRIVATE_KEY;
+const USE_SEPOLIA_DEPLOYER = Boolean(DEPLOYER_KEY && process.env.ALCHEMY_SEPOLIA_URL);
+const RPC = USE_SEPOLIA_DEPLOYER
+  ? process.env.ALCHEMY_SEPOLIA_URL
+  : process.env.CHAIN_RPC_URL;
+const ADDR = USE_SEPOLIA_DEPLOYER
+  ? process.env.SEPOLIA_IDENTITY_REGISTRY_ADDRESS
+  : process.env.IDENTITY_REGISTRY_ADDRESS;
+const KEY = DEPLOYER_KEY ?? process.env.ANCHOR_PRIVATE_KEY;
+const EXPECTED_CHAIN_ID = USE_SEPOLIA_DEPLOYER ? 11_155_111 : Number(process.env.CHAIN_ID ?? 31_337);
+export const identityRegistryNetwork = USE_SEPOLIA_DEPLOYER ? 'sepolia' : 'local';
+export const identityRegistryChainId = EXPECTED_CHAIN_ID;
 
 /** Writing (anchoring) needs all three; reading only needs RPC + address. */
 export const isChainConfigured = Boolean(RPC && ADDR && KEY);
@@ -53,6 +68,9 @@ export async function anchorCredential(
     const contract = new ethers.Contract(ADDR as string, ABI, wallet);
     const hash = toBytes32(credentialHash);
     const net = await provider.getNetwork();
+    if (Number(net.chainId) !== EXPECTED_CHAIN_ID) {
+      throw new Error(`Identity registry network mismatch: expected ${EXPECTED_CHAIN_ID}, received ${net.chainId}.`);
+    }
 
     // Idempotent: if this hash is already on-chain, don't re-send (the contract
     // would revert with "already registered").
@@ -92,6 +110,9 @@ export async function verifyOnChain(credentialHash: string): Promise<OnChainStat
     const hash = toBytes32(credentialHash);
     const [isValid, stateNum, expiresAt] = await contract.verifyCredential(hash);
     const net = await provider.getNetwork();
+    if (Number(net.chainId) !== EXPECTED_CHAIN_ID) {
+      throw new Error(`Identity registry network mismatch: expected ${EXPECTED_CHAIN_ID}, received ${net.chainId}.`);
+    }
     return {
       exists: Number(stateNum) !== 0,
       isValid: Boolean(isValid),
@@ -103,15 +124,4 @@ export async function verifyOnChain(credentialHash: string): Promise<OnChainStat
     console.warn("[prahari] verifyOnChain:", err?.message ?? err);
     return null;
   }
-}
-exists: Number(stateNum) !== 0,
-  isValid: Boolean(isValid),
-    state: CREDENTIAL_STATE[Number(stateNum)] ?? "Unknown",
-      expiresAt: Number(expiresAt),
-        chainId: Number(net.chainId),
-    };
-  } catch (err: any) {
-  console.warn("[prahari] verifyOnChain:", err?.message ?? err);
-  return null;
-}
 }

@@ -26,6 +26,8 @@ create table tourists (
   "identityStatus"    text default 'verified'
                         check ("identityStatus" in ('verified','pending','flagged','revoked')),
   did                 text,
+  "touristAccessCodeHash" text,
+  "touristAccessCodeSalt" text,
   "issueDate"         text,
   "emergencyContacts" jsonb default '[]'::jsonb,
   accommodation       jsonb default '{}'::jsonb,
@@ -104,6 +106,18 @@ create table incidents (
   timeline                  jsonb default '[]'::jsonb,
   "emergencyContactNotifications" jsonb,
   "efirDraft"               jsonb,
+  "missingPersonDraft"      jsonb,
+  "transportType"           text,
+  "hopCount"                integer,
+  "originalTimestamp"       timestamptz,
+  "relayPath"               jsonb,
+  "originDeviceId"          text,
+  "packetId"                text,
+  "voiceStatement"          text,
+  "voiceStatementLanguage"  text,
+  "emergencyIdentificationProfile" jsonb,
+  "emergencyIdentificationProfileSharedAt" timestamptz,
+  "incidentMessages"        jsonb default '[]'::jsonb,
   "resolvedAt"              timestamptz,
   "cancelledAt"             timestamptz,
   "cancelledBy"              text,
@@ -111,6 +125,7 @@ create table incidents (
 );
 create index incidents_created_idx on incidents ("createdAt" desc);
 create index incidents_efir_idx on incidents (("efirDraft" is not null));
+create index incidents_missing_person_draft_idx on incidents (("missingPersonDraft" is not null));
 
 -- ------------------------------------------------------------------ users
 create table users (

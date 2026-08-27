@@ -5,7 +5,10 @@ export type SafetySignalCode =
   | "route_deviation"
   | "unexpected_speed"
   | "low_location_quality"
-  | "high_risk_zone";
+  | "high_risk_zone"
+  | "nighttime_exposure"
+  | "local_incident_density"
+  | "official_hazard";
 
 export type SafetySignal = {
   code: SafetySignalCode;
@@ -24,6 +27,9 @@ export type SafetyAssessment = {
     routeDeviationMeters: number | null;
     derivedSpeedKph: number | null;
     zoneRisk: number;
+    localIncidentCount: number;
+    environmentalRisk: number;
+    isNighttime: boolean;
   };
   signals: SafetySignal[];
 };
@@ -41,6 +47,12 @@ type AssessmentInput = {
   accuracy?: number | null;
   reportedSpeedMps?: number | null;
   zoneRisk?: number;
+  /** Real, non-fixture incidents near this point in the configured review window. */
+  localIncidentCount?: number;
+  /** 0–30 impact calculated from matching official hazard advisories. */
+  environmentalRisk?: number;
+  /** Local hour for the traveller's operating region; defaults to Asia/Kolkata. */
+  localHour?: number;
   plannedRoute?: SafetyCoordinates[] | null;
   now?: Date;
 };
@@ -108,6 +120,10 @@ export function assessSafetyRisk(input: AssessmentInput): SafetyAssessment {
   const now = input.now ?? new Date();
   const signals: SafetySignal[] = [];
   const zoneRisk = Math.max(0, Math.min(40, input.zoneRisk ?? 0));
+  const localIncidentCount = Math.max(0, Math.min(20, Math.floor(input.localIncidentCount ?? 0)));
+  const environmentalRisk = Math.max(0, Math.min(30, Math.round(input.environmentalRisk ?? 0)));
+  const localHour = Number.isInteger(input.localHour) ? Number(input.localHour) : Number(new Intl.DateTimeFormat('en-IN', { hour: 'numeric', hourCycle: 'h23', timeZone: 'Asia/Kolkata' }).format(now));
+  const isNighttime = localHour >= 22 || localHour < 5;
   let score = Math.round(zoneRisk * 0.75);
 
   if (zoneRisk > 0) {
@@ -117,6 +133,37 @@ export function assessSafetyRisk(input: AssessmentInput): SafetyAssessment {
       message: "Current location is inside a configured risk zone.",
       contribution: Math.round(zoneRisk * 0.75),
     });
+  }
+
+  if (localIncidentCount > 0) {
+    const contribution = Math.min(25, 5 + localIncidentCount * 4);
+    signals.push({
+      code: 'local_incident_density',
+      severity: contribution >= 20 ? 'high' : contribution >= 12 ? 'medium' : 'low',
+      message: `${localIncidentCount} recent operational incident${localIncidentCount === 1 ? '' : 's'} were recorded near this location.`,
+      contribution,
+    });
+    score += contribution;
+  }
+
+  if (environmentalRisk > 0) {
+    signals.push({
+      code: 'official_hazard',
+      severity: environmentalRisk >= 25 ? 'critical' : environmentalRisk >= 15 ? 'high' : 'medium',
+      message: 'An official nearby hazard advisory increases the safety review score.',
+      contribution: environmentalRisk,
+    });
+    score += environmentalRisk;
+  }
+
+  if (isNighttime) {
+    signals.push({
+      code: 'nighttime_exposure',
+      severity: 'low',
+      message: 'Late-night travel increases the contextual safety review score.',
+      contribution: 5,
+    });
+    score += 5;
   }
 
   const last = input.previousLocations.find((location) => previousCoordinates(location) && location.timestamp);
@@ -174,7 +221,7 @@ export function assessSafetyRisk(input: AssessmentInput): SafetyAssessment {
     level: riskLevel(score),
     requiresHumanReview: score >= 70,
     model: "explainable-safety-signals-v1",
-    featureSummary: { inactivityMinutes, routeDeviationMeters, derivedSpeedKph, zoneRisk },
+    featureSummary: { inactivityMinutes, routeDeviationMeters, derivedSpeedKph, zoneRisk, localIncidentCount, environmentalRisk, isNighttime },
     signals,
   };
 }

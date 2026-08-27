@@ -5,9 +5,18 @@ const ABI = [
   'function verifyIncidentHash(bytes32 incidentIdKey, bytes32 computedHash) external view returns (bool isValid, uint8 status, uint256 timestamp, bool isAudited)',
 ];
 
-const RPC = process.env.CHAIN_RPC_URL;
-const ADDRESS = process.env.INCIDENT_REGISTRY_ADDRESS;
-const KEY = process.env.ANCHOR_PRIVATE_KEY;
+const DEPLOYER_KEY = process.env.DEPLOYER_PRIVATE_KEY;
+const USE_SEPOLIA_DEPLOYER = Boolean(DEPLOYER_KEY && process.env.ALCHEMY_SEPOLIA_URL);
+const RPC = USE_SEPOLIA_DEPLOYER
+  ? process.env.ALCHEMY_SEPOLIA_URL
+  : process.env.CHAIN_RPC_URL;
+const ADDRESS = USE_SEPOLIA_DEPLOYER
+  ? process.env.SEPOLIA_INCIDENT_REGISTRY_ADDRESS
+  : process.env.INCIDENT_REGISTRY_ADDRESS;
+const KEY = DEPLOYER_KEY ?? process.env.ANCHOR_PRIVATE_KEY;
+const EXPECTED_CHAIN_ID = USE_SEPOLIA_DEPLOYER ? 11_155_111 : Number(process.env.CHAIN_ID ?? 31_337);
+export const incidentRegistryNetwork = USE_SEPOLIA_DEPLOYER ? 'sepolia' : 'local';
+export const incidentRegistryChainId = EXPECTED_CHAIN_ID;
 
 export const isIncidentChainConfigured = Boolean(RPC && ADDRESS && KEY);
 export const isIncidentChainReadable = Boolean(RPC && ADDRESS);
@@ -59,6 +68,9 @@ export async function anchorEfirEvidence(incidentId: string, efir: Record<string
     const contract = new ethers.Contract(ADDRESS as string, ABI, wallet);
     const commitment = createEfirCommitment(incidentId, efir);
     const network = await provider.getNetwork();
+    if (Number(network.chainId) !== EXPECTED_CHAIN_ID) {
+      throw new Error(`Incident registry network mismatch: expected ${EXPECTED_CHAIN_ID}, received ${network.chainId}.`);
+    }
 
     const [alreadyMatches] = await contract.verifyIncidentHash(commitment.incidentKey, commitment.payloadHash);
     if (alreadyMatches) {
@@ -90,6 +102,9 @@ export async function verifyEfirEvidence(incidentId: string, efir: Record<string
     const contract = new ethers.Contract(ADDRESS as string, ABI, provider);
     const [matches, status, timestamp, audited] = await contract.verifyIncidentHash(commitment.incidentKey, commitment.payloadHash);
     const network = await provider.getNetwork();
+    if (Number(network.chainId) !== EXPECTED_CHAIN_ID) {
+      throw new Error(`Incident registry network mismatch: expected ${EXPECTED_CHAIN_ID}, received ${network.chainId}.`);
+    }
     return {
       configured: true,
       anchored: Number(timestamp) > 0,

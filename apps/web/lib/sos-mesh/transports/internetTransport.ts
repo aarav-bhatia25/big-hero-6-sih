@@ -1,5 +1,5 @@
 /**
- * Offline SOS Mesh — Direct Internet Transport
+ * Direct Internet SOS transport
  * 
  * Attempts immediate REST API POST to `/api/incidents` when browser internet connectivity is available.
  */
@@ -19,7 +19,7 @@ export class InternetTransport implements SOSTransport {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 4000);
 
-      let res = await fetch('/api/incidents', {
+      const res = await fetch('/api/incidents', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
@@ -29,7 +29,10 @@ export class InternetTransport implements SOSTransport {
           location: { lat: packet.latitude, lng: packet.longitude },
           severity: packet.severity,
           status: 'ACTIVE',
-          transportType: packet.lastKnownTransport ?? 'INTERNET',
+          // This field records the channel that reached the authority queue,
+          // not the packet's local pre-uplink state. Relay provenance remains
+          // in packetId, originDeviceId, relayPath, and hopCount.
+          transportType: 'INTERNET',
           hopCount: packet.hopCount,
           originDeviceId: packet.originDeviceId,
           originalTimestamp: new Date(packet.timestamp).toISOString(),
@@ -39,14 +42,6 @@ export class InternetTransport implements SOSTransport {
         }),
       }).catch(() => null);
 
-      if (!res || !res.ok) {
-        res = await fetch('/api/sos-relay', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ packet }),
-        }).catch(() => null);
-      }
-
       clearTimeout(timeoutId);
       const data = res ? await res.json().catch(() => null) : null;
 
@@ -54,7 +49,7 @@ export class InternetTransport implements SOSTransport {
         return {
           success: true,
           channel: 'INTERNET',
-          message: data.message || 'SOS delivered directly to police backend via Internet.',
+          message: data.message || 'SOS recorded directly in the Prahari authority queue via Internet.',
           incidentId: data.incident?.incidentId || packet.incidentId,
           incidentRecord: data.incident ?? data.incidentRecord,
           transmittedAt: Date.now(),
