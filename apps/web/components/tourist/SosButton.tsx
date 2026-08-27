@@ -3,6 +3,8 @@
 import React, { useState } from 'react';
 import { Siren, CheckCircle2, Loader2, XCircle } from 'lucide-react';
 import OfflineEmergencyChat from '@/components/tourist/OfflineEmergencyChat';
+import { createSOSPacket } from '@/lib/sos-mesh/sosPacket';
+import { globalTransportManager } from '@/lib/sos-mesh/transports/transportManager';
 
 interface SosButtonProps {
   touristPos?: { lat: number; lng: number };

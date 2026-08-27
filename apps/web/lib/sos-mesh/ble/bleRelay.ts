@@ -1,15 +1,18 @@
 /**
- * Offline SOS Mesh — Emergency Relay Engine
+ * Offline SOS Mesh — Nostr Zero-Trust Emergency Relay Engine
  * 
  * Runs on devices acting as opportunistic Emergency Relay Beacons.
- * Handles deduplication, TTL validation, local storage, and opportunistic forwarding.
+ * Performs cryptographic Nostr signature validation, Bloom filter deduplication,
+ * TTL checks, local persistent storage, and opportunistic binary forwarding.
  */
 
-import { SOSPacket, isPacketExpired, incrementPacketHop, getOrCreateDeviceId } from '../sosPacket';
+import { SOSPacket, isPacketExpired, incrementPacketHop, getOrCreateDeviceId, verifyNostrSOSEvent } from '../sosPacket';
 import { hasSeenPacket, markPacketAsSeen, saveQueuedPacket } from '../indexedDbQueue';
+import { BloomFilter } from '../bloomFilter';
+import { packNostrEvent } from '../nostrEncoder';
 
 export interface RelayEvent {
-  type: 'PACKET_RECEIVED' | 'PACKET_FORWARDED' | 'DUPLICATE_DROPPED' | 'EXPIRED_DROPPED';
+  type: 'PACKET_RECEIVED' | 'PACKET_FORWARDED' | 'DUPLICATE_DROPPED' | 'EXPIRED_DROPPED' | 'INVALID_SIGNATURE_DROPPED';
   packetId: string;
   hopCount: number;
   timestamp: number;
@@ -20,6 +23,7 @@ export interface RelayEvent {
 export class BLERelayEngine {
   private isEnabled = true;
   private eventListeners: Set<(event: RelayEvent) => void> = new Set();
+  private localBloomFilter = new BloomFilter(128, 3);
 
   public isRelayActive(): boolean {
     return this.isEnabled;
@@ -32,6 +36,10 @@ export class BLERelayEngine {
   public subscribe(listener: (event: RelayEvent) => void): () => void {
     this.eventListeners.add(listener);
     return () => this.eventListeners.delete(listener);
+  }
+
+  public getBloomFilter(): BloomFilter {
+    return this.localBloomFilter;
   }
 
   /**
@@ -57,21 +65,41 @@ export class BLERelayEngine {
       return { action: 'DROPPED', reason: 'Packet expired or max hops reached.' };
     }
 
-    // 2. Deduplication check
-    const alreadySeen = await hasSeenPacket(packet.packetId);
-    if (alreadySeen) {
-      this.emit({
-        type: 'DUPLICATE_DROPPED',
-        packetId: packet.packetId,
-        hopCount: packet.hopCount,
-        timestamp: Date.now(),
-        relayDeviceId: currentDeviceId,
-        detail: 'Packet ID already processed by this node.',
-      });
-      return { action: 'DROPPED', reason: 'Duplicate packet ID already seen.' };
+    // 2. Cryptographic Nostr Zero-Trust verification
+    if (packet.nostrEvent) {
+      const isValidSig = verifyNostrSOSEvent(packet.nostrEvent);
+      if (!isValidSig) {
+        this.emit({
+          type: 'INVALID_SIGNATURE_DROPPED',
+          packetId: packet.packetId,
+          hopCount: packet.hopCount,
+          timestamp: Date.now(),
+          relayDeviceId: currentDeviceId,
+          detail: 'Cryptographic Nostr Event sha256 or signature check failed.',
+        });
+        return { action: 'DROPPED', reason: 'Invalid cryptographic signature.' };
+      }
     }
 
-    // Mark as seen immediately
+    // 3. Bloom filter & deduplication check
+    const nostrId = packet.nostrEvent?.id ?? packet.packetId;
+    if (this.localBloomFilter.has(nostrId)) {
+      const alreadySeen = await hasSeenPacket(packet.packetId);
+      if (alreadySeen) {
+        this.emit({
+          type: 'DUPLICATE_DROPPED',
+          packetId: packet.packetId,
+          hopCount: packet.hopCount,
+          timestamp: Date.now(),
+          relayDeviceId: currentDeviceId,
+          detail: 'Packet ID already processed by this node.',
+        });
+        return { action: 'DROPPED', reason: 'Duplicate packet ID already seen.' };
+      }
+    }
+
+    // Record in Bloom filter and DB
+    this.localBloomFilter.add(nostrId);
     await markPacketAsSeen(packet.packetId);
 
     this.emit({
@@ -82,11 +110,11 @@ export class BLERelayEngine {
       relayDeviceId: currentDeviceId,
     });
 
-    // 3. Store locally in IndexedDB
+    // 4. Store locally in IndexedDB
     const updatedPacket = incrementPacketHop(packet, currentDeviceId, 'BLE_RELAY');
     await saveQueuedPacket(updatedPacket, 'QUEUED');
 
-    // 4. Gateway check: If online, upload to police backend immediately!
+    // 5. Gateway check: If online, upload to police backend immediately!
     if (typeof navigator !== 'undefined' && navigator.onLine) {
       try {
         const res = await fetch('/api/sos-relay', {
@@ -112,13 +140,20 @@ export class BLERelayEngine {
       }
     }
 
-    // 5. Forward to next hop over BroadcastChannel / BLE Mesh
+    // 6. Forward to next hop over BroadcastChannel / BLE Mesh using compact binary Nostr buffer
     if (typeof BroadcastChannel !== 'undefined') {
       try {
         const bc = new BroadcastChannel('prahari_sos_mesh');
+        let binaryWireBuffer: ArrayBuffer | null = null;
+        if (updatedPacket.nostrEvent) {
+          const u8 = packNostrEvent(updatedPacket.nostrEvent);
+          binaryWireBuffer = (u8.buffer as ArrayBuffer).slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
+        }
+
         bc.postMessage({
           type: 'EMERGENCY_SOS_RELAY',
           packet: updatedPacket,
+          binaryBuffer: binaryWireBuffer,
           senderDeviceId: currentDeviceId,
           timestamp: Date.now(),
         });
@@ -136,7 +171,7 @@ export class BLERelayEngine {
       relayDeviceId: currentDeviceId,
     });
 
-    return { action: 'RELAYED', reason: 'Packet stored locally and forwarded to mesh.' };
+    return { action: 'RELAYED', reason: 'Packet verified, stored locally, and forwarded to mesh.' };
   }
 
   private emit(event: RelayEvent) {

@@ -1,19 +1,19 @@
 /**
- * Offline SOS Mesh — BLE & Peer Broadcast Mesh Transport
+ * Offline SOS Mesh — Nostr BLE & Peer Broadcast Mesh Transport
  * 
- * Manages peer discovery and opportunistic packet forwarding across nearby devices.
+ * Manages peer discovery and opportunistic binary packet forwarding across nearby devices.
  * Combines Web Bluetooth capability detection with a local BroadcastChannel peer mesh layer
- * for browser environments, and acts as the native bridge entry point.
+ * and compact Nostr binary wire encoding.
  */
 
 import { SOSTransport, TransportResult } from './types';
-import { SOSPacket, serializeSOSPacket, incrementPacketHop, getOrCreateDeviceId } from '../sosPacket';
+import { SOSPacket, incrementPacketHop, getOrCreateDeviceId, verifyNostrSOSEvent, fromNostrSOSEvent } from '../sosPacket';
 import { markPacketAsSeen, hasSeenPacket, saveQueuedPacket } from '../indexedDbQueue';
+import { packNostrEvent, unpackNostrEvent } from '../nostrEncoder';
 
 export class BleTransport implements SOSTransport {
   public readonly name = 'BLE_RELAY';
   private broadcastChannel?: BroadcastChannel;
-  private peerCount = 0;
   private isRelayModeActive = true;
 
   constructor() {
@@ -51,11 +51,19 @@ export class BleTransport implements SOSTransport {
       // Persist local record as RELAYED
       await saveQueuedPacket(relayedPacket, 'RELAYED');
 
+      // Compact Binary Encoding for BLE / Radio wire transport
+      let binaryBuffer: ArrayBuffer | null = null;
+      if (relayedPacket.nostrEvent) {
+        const u8 = packNostrEvent(relayedPacket.nostrEvent);
+        binaryBuffer = (u8.buffer as ArrayBuffer).slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
+      }
+
       // Broadcast over Mesh Channel to nearby peers
       if (this.broadcastChannel) {
         this.broadcastChannel.postMessage({
           type: 'EMERGENCY_SOS_RELAY',
           packet: relayedPacket,
+          binaryBuffer,
           senderDeviceId: currentDeviceId,
           timestamp: Date.now(),
         });
@@ -66,7 +74,7 @@ export class BleTransport implements SOSTransport {
         (window as any).__PRAHARI_MESH_SIMULATOR__.receivePacket(relayedPacket);
       }
 
-      // Relay directly to Police Gateway endpoint
+      // Relay directly to Police Gateway endpoint if internet is available
       let incidentRecord: any = null;
       try {
         const relayRes = await fetch('/api/sos-relay', {
@@ -87,7 +95,7 @@ export class BleTransport implements SOSTransport {
       return {
         success: true,
         channel: 'BLE_RELAY',
-        message: 'SOS packet transmitted to nearby emergency mesh gateway.',
+        message: 'Nostr SOS packet transmitted over high-efficiency BLE mesh.',
         incidentId: packet.incidentId,
         incidentRecord,
         transmittedAt: Date.now(),
@@ -106,39 +114,59 @@ export class BleTransport implements SOSTransport {
     this.broadcastChannel.onmessage = async (event) => {
       if (!this.isRelayModeActive) return;
       const data = event.data;
-      if (data && data.type === 'EMERGENCY_SOS_RELAY' && data.packet) {
-        const incomingPacket: SOSPacket = data.packet;
-        const currentDeviceId = getOrCreateDeviceId();
+      if (!data || data.type !== 'EMERGENCY_SOS_RELAY') return;
 
-        // Do not process own packets or already seen packets
-        if (incomingPacket.originDeviceId === currentDeviceId) return;
-        const alreadySeen = await hasSeenPacket(incomingPacket.packetId);
-        if (alreadySeen) return;
+      let incomingPacket: SOSPacket | null = data.packet ?? null;
 
-        console.log('[BleTransport] Received offline SOS packet from peer:', incomingPacket.packetId);
-        await markPacketAsSeen(incomingPacket.packetId);
+      // Handle binary payload if present
+      if (data.binaryBuffer && data.binaryBuffer instanceof ArrayBuffer) {
+        const unpackedNostr = unpackNostrEvent(new Uint8Array(data.binaryBuffer));
+        if (unpackedNostr) {
+          incomingPacket = fromNostrSOSEvent(unpackedNostr);
+        }
+      }
 
-        // Store received packet in local queue
-        await saveQueuedPacket(incomingPacket, 'QUEUED');
+      if (!incomingPacket) return;
 
-        // If online, immediately relay to internet gateway!
-        if (typeof navigator !== 'undefined' && navigator.onLine) {
-          console.log('[BleTransport] Peer device has Internet! Gateway uploading packet to police...');
-          try {
-            const res = await fetch('/api/sos-relay', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ packet: incomingPacket }),
-            });
+      const currentDeviceId = getOrCreateDeviceId();
 
-            if (res.ok) {
-              const resData = await res.json();
-              console.log('[BleTransport] Relay gateway upload succeeded:', resData);
-              await saveQueuedPacket(incomingPacket, 'DELIVERED');
-            }
-          } catch (err) {
-            console.error('[BleTransport] Relay gateway upload error:', err);
+      // Do not process own packets or already seen packets
+      if (incomingPacket.originDeviceId === currentDeviceId) return;
+      const alreadySeen = await hasSeenPacket(incomingPacket.packetId);
+      if (alreadySeen) return;
+
+      // Verify Nostr Zero-Trust signature
+      if (incomingPacket.nostrEvent) {
+        const isValidSig = verifyNostrSOSEvent(incomingPacket.nostrEvent);
+        if (!isValidSig) {
+          console.warn('[BleTransport] Dropping packet with invalid Nostr signature:', incomingPacket.packetId);
+          return;
+        }
+      }
+
+      console.log('[BleTransport] Received verified Nostr SOS packet from peer mesh:', incomingPacket.packetId);
+      await markPacketAsSeen(incomingPacket.packetId);
+
+      // Store received packet in local queue
+      await saveQueuedPacket(incomingPacket, 'QUEUED');
+
+      // If online, immediately relay to internet gateway!
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        console.log('[BleTransport] Gateway device online: Uploading peer Nostr SOS packet to police...');
+        try {
+          const res = await fetch('/api/sos-relay', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ packet: incomingPacket }),
+          });
+
+          if (res.ok) {
+            const resData = await res.json();
+            console.log('[BleTransport] Relay gateway upload succeeded:', resData);
+            await saveQueuedPacket(incomingPacket, 'DELIVERED');
           }
+        } catch (err) {
+          console.error('[BleTransport] Relay gateway upload error:', err);
         }
       }
     };
