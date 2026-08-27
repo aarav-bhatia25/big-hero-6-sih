@@ -1,9 +1,11 @@
 /**
  * SOS delivery coordinator.
  *
- * Internet is the complete, primary path. BLE is never loaded or queried while
- * that path works; it is an explicit, optional offline relay. If neither is
- * available, the packet is held in this browser's retry queue.
+ * Internet is the complete, primary path, and no offline link is loaded or
+ * queried while it works. When it fails, the packet is first written to this
+ * browser's durable queue — nothing is ever handed to a relay without also
+ * being kept here — and only then offered to the direct peer mesh and, if the
+ * traveller paired one, a BLE relay gateway.
  */
 
 import type { SOSTransport, TransportResult } from './types';
@@ -13,29 +15,40 @@ import { SOSPacket } from '../sosPacket';
 import { globalSOSStateMachine } from '../sosStateMachine';
 import { getPendingQueuedPackets, updateQueuedPacketStatus } from '../indexedDbQueue';
 
-type BleTransportLoader = () => Promise<SOSTransport | null>;
+type TransportLoader = () => Promise<SOSTransport | null>;
 
 export type SOSTransportManagerDependencies = {
   internetTransport?: InternetTransport;
   localTransport?: LocalTransport;
-  loadBleTransport?: BleTransportLoader;
+  loadBleTransport?: TransportLoader;
+  loadPeerMeshTransport?: TransportLoader;
 };
 
-const loadOptionalBleTransport: BleTransportLoader = async () => {
+const loadOptionalBleTransport: TransportLoader = async () => {
   const { globalBleTransport } = await import('./bleTransport');
   return globalBleTransport;
+};
+
+const loadOptionalPeerMeshTransport: TransportLoader = async () => {
+  // Checked before the import so a server or an unsupported browser never pays
+  // to load WebRTC code it cannot use.
+  if (typeof RTCPeerConnection === 'undefined') return null;
+  const { globalWebRtcTransport } = await import('./webRtcTransport');
+  return globalWebRtcTransport;
 };
 
 export class SOSTransportManager {
   private readonly internetTransport: InternetTransport;
   private readonly localTransport: LocalTransport;
-  private readonly loadBleTransport: BleTransportLoader;
+  private readonly loadBleTransport: TransportLoader;
+  private readonly loadPeerMeshTransport: TransportLoader;
   private isProcessingQueue = false;
 
   constructor(dependencies: SOSTransportManagerDependencies = {}) {
     this.internetTransport = dependencies.internetTransport ?? new InternetTransport();
     this.localTransport = dependencies.localTransport ?? new LocalTransport();
     this.loadBleTransport = dependencies.loadBleTransport ?? loadOptionalBleTransport;
+    this.loadPeerMeshTransport = dependencies.loadPeerMeshTransport ?? loadOptionalPeerMeshTransport;
 
     if (typeof window !== 'undefined') {
       window.addEventListener('online', () => {
@@ -67,11 +80,42 @@ export class SOSTransportManager {
   }
 
   /**
-   * Sends an SOS directly over the authenticated web API first. `allowBleRelay`
-   * defaults to false so a traveller must deliberately set up the optional
-   * gateway; Wi-Fi delivery and offline local retry require no BLE support.
+   * Attempts an offline link that has been explicitly enabled. Returns null
+   * when the link is disabled, absent, or reports itself unavailable.
    */
-  public async dispatch(packet: SOSPacket, { allowBleRelay = false }: { allowBleRelay?: boolean } = {}): Promise<TransportResult> {
+  private async tryOfflineLink(
+    enabled: boolean,
+    load: TransportLoader,
+    packet: SOSPacket,
+    tryingState: 'TRY_PEER_MESH' | 'TRY_BLE_RELAY'
+  ): Promise<TransportResult | null> {
+    if (!enabled) return null;
+    try {
+      const transport = await load();
+      if (!transport) return null;
+      globalSOSStateMachine.transitionTo(tryingState, { incidentId: packet.incidentId });
+      const result = await this.tryTransport(transport, packet);
+      return result?.success ? result : null;
+    } catch {
+      // Every offline link is optional. A missing API, an unsupported browser,
+      // or a gateway error must never disturb the durable local fallback.
+      return null;
+    }
+  }
+
+  /**
+   * Sends an SOS over the authenticated web API first. When that fails the
+   * packet is persisted locally before any relay is tried, so a handoff to a
+   * nearby device never becomes this browser's only copy.
+   *
+   * `allowBleRelay` stays opt-in: it needs a deliberately provisioned gateway.
+   * `allowPeerMesh` is on by default but only does anything once the traveller
+   * has actually paired a nearby device.
+   */
+  public async dispatch(
+    packet: SOSPacket,
+    { allowBleRelay = false, allowPeerMesh = true }: { allowBleRelay?: boolean; allowPeerMesh?: boolean } = {}
+  ): Promise<TransportResult> {
     globalSOSStateMachine.transitionTo('TRY_INTERNET', {
       incidentId: packet.incidentId,
       message: 'Sending SOS directly to the Prahari authority queue…',
@@ -80,29 +124,32 @@ export class SOSTransportManager {
     const internetResult = await this.tryTransport(this.internetTransport, packet);
     if (internetResult?.success) return this.markDelivered(packet, internetResult);
 
-    if (allowBleRelay) {
-      try {
-        const bleTransport = await this.loadBleTransport();
-        if (bleTransport) {
-          globalSOSStateMachine.transitionTo('TRY_BLE_RELAY', { incidentId: packet.incidentId });
-          const bleResult = await this.tryTransport(bleTransport, packet);
-          if (bleResult?.success) {
-            globalSOSStateMachine.transitionTo('RELAYED', {
-              incidentId: packet.incidentId,
-              transport: 'BLE_RELAY',
-              hopCount: packet.hopCount,
-              message: bleResult.message || 'SOS accepted by the optional BLE relay gateway.',
-            });
-            return bleResult;
-          }
-        }
-      } catch {
-        // BLE is optional. A missing API, unsupported browser, or gateway error
-        // must never prevent the durable local fallback.
-      }
+    // Durable first. Whatever happens on the radio, this device keeps a copy
+    // and retries it the moment a network returns.
+    const localResult = await this.tryTransport(this.localTransport, packet);
+
+    const peerResult = await this.tryOfflineLink(allowPeerMesh, this.loadPeerMeshTransport, packet, 'TRY_PEER_MESH');
+    if (peerResult) {
+      globalSOSStateMachine.transitionTo('RELAYED', {
+        incidentId: packet.incidentId,
+        transport: 'PEER_MESH',
+        hopCount: packet.hopCount,
+        message: peerResult.message || 'SOS handed to a nearby device on the direct peer mesh.',
+      });
+      return peerResult;
     }
 
-    const localResult = await this.tryTransport(this.localTransport, packet);
+    const bleResult = await this.tryOfflineLink(allowBleRelay, this.loadBleTransport, packet, 'TRY_BLE_RELAY');
+    if (bleResult) {
+      globalSOSStateMachine.transitionTo('RELAYED', {
+        incidentId: packet.incidentId,
+        transport: 'BLE_RELAY',
+        hopCount: packet.hopCount,
+        message: bleResult.message || 'SOS accepted by the optional BLE relay gateway.',
+      });
+      return bleResult;
+    }
+
     if (localResult?.success) {
       globalSOSStateMachine.transitionTo('LOCAL_PERSISTED', {
         incidentId: packet.incidentId,

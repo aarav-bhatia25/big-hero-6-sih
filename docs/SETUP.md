@@ -23,7 +23,7 @@ pnpm lint
 
 ## Database migrations
 
-Apply the additive SQL in `supabase/migrations/` in numeric order. The current durable emergency, emergency-profile, chat, recovery-code, and geofence flows require migrations `005` through `011` in addition to the earlier base migrations.
+Apply the additive SQL in `supabase/migrations/` in numeric order. The current durable emergency, emergency-profile, chat, recovery-code, and geofence flows require migrations `005` through `012` in addition to the earlier base migrations.
 
 After applying them, open:
 

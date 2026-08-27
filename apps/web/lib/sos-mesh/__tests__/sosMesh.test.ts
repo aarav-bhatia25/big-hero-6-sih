@@ -9,13 +9,26 @@ import assert from 'node:assert';
 import { test, describe } from 'node:test';
 
 import {
+  calculateNostrEventId,
   createSOSPacket,
   isValidSOSPacket,
   isPacketExpired,
+  fromNostrSOSEvent,
   incrementPacketHop,
+  meshEventId,
   serializeSOSPacket,
   deserializeSOSPacket,
+  verifyNostrSOSEvent,
 } from '../sosPacket';
+import { __setDeviceKeyPairForTesting } from '../nostrKeys';
+import { packMeshFrame, unpackMeshFrame } from '../nostrEncoder';
+import { BloomFilter } from '../bloomFilter';
+import { verifyRelayedPacket } from '../meshTrust';
+
+// Node has no localStorage, so the device identity is installed explicitly.
+// A fixed secret keeps signatures reproducible across runs.
+const TEST_SECRET = '0'.repeat(63) + '1';
+const TEST_DEVICE = __setDeviceKeyPairForTesting(TEST_SECRET)!;
 
 import { SOSStateMachine } from '../sosStateMachine';
 import { getPendingQueuedPackets, hasSeenPacket, markPacketAsSeen, saveQueuedPacket } from '../indexedDbQueue';
@@ -242,5 +255,169 @@ describe('SOS delivery independence from BLE', () => {
     assert.strictEqual(result.channel, 'LOCAL_QUEUE');
     assert.strictEqual(local.calls, 1);
     assert.strictEqual(bleWasLoaded, false);
+  });
+});
+
+
+describe('Offline SOS Mesh — Nostr signing & zero-trust verification', () => {
+  test('signs every packet with a real BIP-340 signature that verifies', () => {
+    const packet = createSOSPacket({ touristId: 'TOUR-SIGN', latitude: 26.1445, longitude: 91.7362 });
+
+    assert.strictEqual(packet.nostrEvent?.pubkey, TEST_DEVICE.pubkeyHex);
+    assert.strictEqual(packet.nostrEvent?.sig.length, 128);
+    assert.strictEqual(verifyNostrSOSEvent(packet.nostrEvent!), true);
+  });
+
+  test('rejects an event whose content was altered in flight', () => {
+    const packet = createSOSPacket({ touristId: 'TOUR-TAMPER', latitude: 19.0, longitude: 72.0 });
+    const altered = { ...packet.nostrEvent!, content: '{"type":"MEDICAL"}' };
+
+    assert.strictEqual(verifyNostrSOSEvent(altered), false);
+  });
+
+  test('rejects a forgery that recomputes a consistent event id but cannot sign it', () => {
+    const packet = createSOSPacket({ touristId: 'TOUR-FORGE', latitude: 19.0, longitude: 72.0 });
+    const event = packet.nostrEvent!;
+
+    // The attacker moves the victim's coordinates and repairs the id so the
+    // hash check passes. Only the signature can catch this.
+    const tags = event.tags.map((tag) => (tag[0] === 'lat' ? ['lat', '0'] : tag));
+    const forged = {
+      ...event,
+      tags,
+      id: calculateNostrEventId(event.pubkey, event.created_at, event.kind, tags, event.content),
+    };
+
+    assert.notStrictEqual(forged.id, event.id);
+    assert.strictEqual(verifyNostrSOSEvent(forged), false);
+  });
+
+  test('keeps the signed event immutable across relay hops so dedup still works', () => {
+    const packet = createSOSPacket({ touristId: 'TOUR-HOPS', latitude: 19.0, longitude: 72.0, ttl: 5 });
+    const hop1 = incrementPacketHop(packet, 'RELAY-A', 'BLE_RELAY');
+    const hop2 = incrementPacketHop(hop1, 'RELAY-B', 'BLE_RELAY');
+
+    assert.strictEqual(hop2.nostrEvent?.id, packet.nostrEvent?.id);
+    assert.strictEqual(meshEventId(hop2), meshEventId(packet));
+    assert.strictEqual(verifyNostrSOSEvent(hop2.nostrEvent!), true);
+    assert.strictEqual(hop2.hopCount, 2);
+    assert.strictEqual(hop2.ttl, 3);
+  });
+});
+
+describe('Offline SOS Mesh — Binary mesh frame codec', () => {
+  test('round-trips identity, location and signature across a hop', () => {
+    const packet = createSOSPacket({
+      touristId: 'TOUR-MESH-1',
+      incidentId: 'INC-4242',
+      latitude: 26.1445,
+      longitude: 91.7362,
+    });
+
+    const decoded = unpackMeshFrame(packMeshFrame(packet));
+    assert.ok(decoded, 'frame should decode');
+
+    const rebuilt = fromNostrSOSEvent(decoded!.event, {
+      ttl: decoded!.ttl,
+      hopCount: decoded!.hopCount,
+      relayPath: decoded!.relayPath,
+    });
+    assert.strictEqual(rebuilt.incidentId, 'INC-4242');
+    assert.strictEqual(rebuilt.touristId, 'TOUR-MESH-1');
+    assert.strictEqual(rebuilt.originDeviceId, packet.originDeviceId);
+    assert.strictEqual(rebuilt.latitude, 26.1445);
+    assert.strictEqual(rebuilt.longitude, 91.7362);
+    assert.strictEqual(rebuilt.severity, 'CRITICAL');
+    // The whole point: the far side can still verify the origin's signature.
+    assert.strictEqual(verifyNostrSOSEvent(rebuilt.nostrEvent!), true);
+  });
+
+  test('carries mutable hop and TTL outside the signed region', () => {
+    const packet = createSOSPacket({ touristId: 'TOUR-ENV', latitude: 19.0, longitude: 72.0, ttl: 6 });
+    const hop1 = incrementPacketHop(packet, 'RELAY-A', 'BLE_RELAY');
+
+    const decoded = unpackMeshFrame(packMeshFrame(hop1));
+    assert.strictEqual(decoded?.ttl, 5);
+    assert.strictEqual(decoded?.hopCount, 1);
+    assert.strictEqual(decoded?.event.id, packet.nostrEvent?.id);
+  });
+
+  test('carries relay provenance so an officer sees the full delivery path', () => {
+    const packet = createSOSPacket({ touristId: 'TOUR-PATH', latitude: 19.0, longitude: 72.0, originDeviceId: 'NODE-ORIGIN' });
+    const hop1 = incrementPacketHop(packet, 'NODE-B', 'BLE_RELAY');
+    const hop2 = incrementPacketHop(hop1, 'NODE-C', 'BLE_RELAY');
+
+    const decoded = unpackMeshFrame(packMeshFrame(hop2));
+    assert.deepStrictEqual(decoded?.relayPath, ['NODE-ORIGIN', 'NODE-B', 'NODE-C']);
+    assert.strictEqual(decoded?.hopCount, 2);
+  });
+
+  test('refuses buffers that are not Prahari mesh frames', () => {
+    assert.strictEqual(unpackMeshFrame(new Uint8Array(4)), null);
+    assert.strictEqual(unpackMeshFrame(new Uint8Array(200)), null);
+  });
+});
+
+describe('Offline SOS Mesh — Bloom peer synchronisation', () => {
+  test('a peer digest survives the wire and names what the peer is missing', () => {
+    const mine = new BloomFilter();
+    ['event-a', 'event-b'].forEach((id) => mine.add(id));
+
+    const peerView = BloomFilter.fromBuffer(mine.toBuffer());
+    assert.strictEqual(peerView.has('event-a'), true);
+
+    const missing = peerView.getMissingItemsForPeer(['event-a', 'event-b', 'event-c']);
+    assert.deepStrictEqual(missing, ['event-c']);
+  });
+});
+
+describe('Offline SOS Mesh — Gateway relay trust', () => {
+  const registeredTourist = { touristId: 'TOUR-MESH-1', meshPubkeys: [TEST_DEVICE.pubkeyHex] };
+
+  const relayedPacket = () => createSOSPacket({
+    touristId: 'TOUR-MESH-1',
+    incidentId: 'INC-4242',
+    latitude: 26.1445,
+    longitude: 91.7362,
+  });
+
+  test('accepts a stranger-relayed packet signed by a registered device key', () => {
+    const verdict = verifyRelayedPacket(relayedPacket(), registeredTourist);
+    assert.strictEqual(verdict.trusted, true);
+  });
+
+  test('refuses a packet signed by a key the tourist never registered', () => {
+    const verdict = verifyRelayedPacket(relayedPacket(), { touristId: 'TOUR-MESH-1', meshPubkeys: [] });
+    assert.strictEqual(verdict.trusted, false);
+  });
+
+  test('a relay cannot rewrite the routing fields of a packet it carries', () => {
+    // The relay keeps the valid signed event but rewrites the plain JSON
+    // envelope around it, trying to redirect the incident.
+    const tampered = {
+      ...relayedPacket(),
+      touristId: 'TOUR-ATTACKER',
+      incidentId: 'INC-9999',
+      latitude: 0,
+      longitude: 0,
+    };
+
+    const verdict = verifyRelayedPacket(tampered, registeredTourist);
+    assert.strictEqual(verdict.trusted, true);
+    assert.strictEqual(verdict.trusted && verdict.packet.touristId, 'TOUR-MESH-1');
+    assert.strictEqual(verdict.trusted && verdict.packet.incidentId, 'INC-4242');
+    assert.strictEqual(verdict.trusted && verdict.packet.latitude, 26.1445);
+  });
+
+  test('refuses a packet older than the mesh retention window', () => {
+    const packet = relayedPacket();
+    const verdict = verifyRelayedPacket(packet, registeredTourist, Date.now() + 48 * 60 * 60 * 1000);
+    assert.strictEqual(verdict.trusted, false);
+  });
+
+  test('refuses an unsigned packet outright', () => {
+    const { nostrEvent, ...unsigned } = relayedPacket();
+    const verdict = verifyRelayedPacket(unsigned as any, registeredTourist);
+    assert.strictEqual(verdict.trusted, false);
   });
 });

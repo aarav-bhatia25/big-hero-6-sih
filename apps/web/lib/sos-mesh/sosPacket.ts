@@ -6,13 +6,20 @@
  */
 
 import { sha256, toUtf8Bytes } from 'ethers';
+import { getDevicePubkey, signEventId, verifyEventSignature } from './nostrKeys';
+
+/** NIP-01 kind numbers used by the Prahari mesh. */
+export const NOSTR_KIND_SOS_ALERT = 20000;
+export const NOSTR_KIND_MESH_CHAT = 20001;
 
 export interface NostrSOSEvent {
   id: string; // 32-byte sha256 hex hash of serialized [0, pubkey, created_at, kind, tags, content]
   pubkey: string; // 32-byte hex public key of sender/tourist
   created_at: number; // UTC epoch timestamp in seconds
   kind: number; // 20000 = Emergency SOS Alert, 20001 = Emergency Mesh Chat
-  tags: string[][]; // e.g. [["g", "te7u81"], ["t", "CRITICAL"], ["inc", "INC-1234"], ["ttl", "8"], ["hop", "0"]]
+  // Signed pre-image. Hop and TTL are deliberately absent: they change on every
+  // relay, and a relay holds no key with which to re-sign the event.
+  tags: string[][]; // e.g. [["g", "te7u81"], ["t", "CRITICAL"], ["inc", "INC-1234"], ["tourist", "TOUR-7890"]]
   content: string; // Payload content or encrypted message
   sig: string; // 64-byte Schnorr/ECDSA signature hex over event id
 }
@@ -100,21 +107,35 @@ export function calculateNostrEventId(
   return hashHex.replace(/^0x/, '');
 }
 
+/**
+ * Coordinates are pinned to 7 decimal places (~1 cm) before they enter the
+ * signed pre-image, so the compact binary codec can carry them as scaled
+ * int32s and rebuild a byte-identical event id on the far side of a hop.
+ */
+export function canonicalCoord(value: number): number {
+  return Math.round(value * 1e7) / 1e7;
+}
+
+/**
+ * Builds and signs the immutable Nostr event for a packet. Called once, by the
+ * originating device. Relays forward the result verbatim.
+ */
 export function toNostrSOSEvent(packet: SOSPacket, pubkeyHex?: string, signatureHex?: string): NostrSOSEvent {
-  const pubkey = pubkeyHex ?? getOrCreatePubkey(packet.touristId);
+  const pubkey = pubkeyHex ?? getDevicePubkey() ?? '';
   const createdAt = Math.floor(packet.timestamp / 1000);
-  const kind = packet.packetCategory === 'CHAT_MESSAGE' ? 20001 : 20000;
-  const lat = packet.latitude ?? 19.0728;
-  const lon = packet.longitude ?? 72.8997;
+  const kind = packet.packetCategory === 'CHAT_MESSAGE' ? NOSTR_KIND_MESH_CHAT : NOSTR_KIND_SOS_ALERT;
+  const lat = canonicalCoord(packet.latitude ?? 0);
+  const lon = canonicalCoord(packet.longitude ?? 0);
   const geohash = encodeGeohash(lat, lon, 6);
 
+  // This tag order is part of the signed pre-image. Any change here must be
+  // mirrored in nostrEncoder's frame layout, or a relayed event will rebuild to
+  // a different id and be dropped as unverifiable.
   const tags: string[][] = [
     ['g', geohash],
     ['t', packet.severity],
     ['inc', packet.incidentId],
     ['tourist', packet.touristId],
-    ['ttl', packet.ttl.toString()],
-    ['hop', packet.hopCount.toString()],
     ['lat', lat.toString()],
     ['lon', lon.toString()],
     ['origin', packet.originDeviceId],
@@ -133,7 +154,10 @@ export function toNostrSOSEvent(packet: SOSPacket, pubkeyHex?: string, signature
       });
 
   const id = calculateNostrEventId(pubkey, createdAt, kind, tags, content);
-  const sig = signatureHex ?? sha256(toUtf8Bytes(id + pubkey)).replace(/^0x/, '').padStart(128, 'a').substring(0, 128);
+  // An unsigned event is left with an empty signature rather than a plausible
+  // looking one. verifyNostrSOSEvent rejects it, which is the honest outcome
+  // when no device identity exists (server-side rendering).
+  const sig = signatureHex ?? signEventId(id) ?? '';
 
   return {
     id,
@@ -146,48 +170,84 @@ export function toNostrSOSEvent(packet: SOSPacket, pubkeyHex?: string, signature
   };
 }
 
-export function fromNostrSOSEvent(event: NostrSOSEvent): SOSPacket {
+/** Mutable per-hop transport metadata carried alongside the signed event. */
+export interface MeshEnvelope {
+  ttl: number;
+  hopCount: number;
+  relayPath?: string[];
+  lastKnownTransport?: SOSPacket['lastKnownTransport'];
+}
+
+/**
+ * Rebuilds a packet from a received event. Envelope fields come from the wire
+ * frame; everything identifying comes from the signed tags, so a relayed SOS
+ * keeps the incident and tourist it was raised for.
+ */
+export function fromNostrSOSEvent(event: NostrSOSEvent, envelope?: Partial<MeshEnvelope>): SOSPacket {
   const getTag = (key: string) => event.tags.find((t) => t[0] === key)?.[1];
-  const incidentId = getTag('inc') ?? `INC-${event.id.substring(0, 6).toUpperCase()}`;
-  const touristId = getTag('tourist') ?? `TOUR-${event.pubkey.substring(0, 8).toUpperCase()}`;
-  const severity = (getTag('t') as 'CRITICAL' | 'HIGH') ?? 'CRITICAL';
-  const ttl = parseInt(getTag('ttl') ?? '8', 10);
-  const hopCount = parseInt(getTag('hop') ?? '0', 10);
-  const lat = parseFloat(getTag('lat') ?? '19.0728');
-  const lon = parseFloat(getTag('lon') ?? '72.8997');
+  const isChat = event.kind === NOSTR_KIND_MESH_CHAT;
   const origin = getTag('origin') ?? `NODE-${event.pubkey.substring(0, 6).toUpperCase()}`;
-  const isChat = event.kind === 20001 || getTag('t') === 'CHAT_MESSAGE';
+  const lat = parseFloat(getTag('lat') ?? '0');
+  const lon = parseFloat(getTag('lon') ?? '0');
+
+  let type: SOSPacket['type'] = 'PANIC';
+  let accuracy = 10;
+  let expiresAt = event.created_at * 1000 + DEFAULT_PACKET_LIFESPAN_MS;
+  if (!isChat && event.content) {
+    try {
+      const parsed = JSON.parse(event.content);
+      if (parsed?.type === 'SOS' || parsed?.type === 'PANIC' || parsed?.type === 'MEDICAL') type = parsed.type;
+      if (typeof parsed?.accuracy === 'number') accuracy = parsed.accuracy;
+      if (typeof parsed?.expiresAt === 'number') expiresAt = parsed.expiresAt;
+    } catch {
+      // A malformed content body still yields a routable packet; the signed
+      // tags carry everything the authority queue actually needs.
+    }
+  }
 
   return {
     version: CURRENT_PACKET_VERSION,
-    packetId: `PKT-${event.id.substring(0, 8).toUpperCase()}`,
-    incidentId,
-    touristId,
-    type: 'PANIC',
-    severity,
+    // Derived from the immutable event id, so the same alert arriving by two
+    // routes collapses to one packet id.
+    packetId: `PKT-${event.id.substring(0, 12).toUpperCase()}`,
+    incidentId: getTag('inc') ?? `INC-${event.id.substring(0, 6).toUpperCase()}`,
+    touristId: getTag('tourist') ?? `TOUR-${event.pubkey.substring(0, 8).toUpperCase()}`,
+    type,
+    severity: getTag('t') === 'HIGH' ? 'HIGH' : 'CRITICAL',
     latitude: lat,
     longitude: lon,
-    accuracy: 10,
+    accuracy,
     timestamp: event.created_at * 1000,
-    expiresAt: (event.created_at * 1000) + DEFAULT_PACKET_LIFESPAN_MS,
-    ttl,
-    hopCount,
+    expiresAt,
+    ttl: envelope?.ttl ?? DEFAULT_PACKET_TTL,
+    hopCount: envelope?.hopCount ?? 0,
     originDeviceId: origin,
-    lastKnownTransport: 'BLE_RELAY',
-    relayPath: [origin],
+    lastKnownTransport: envelope?.lastKnownTransport ?? 'BLE_RELAY',
+    relayPath: envelope?.relayPath ?? [origin],
     signature: event.sig,
     packetCategory: isChat ? 'CHAT_MESSAGE' : 'SOS_ALERT',
     chatText: isChat ? event.content : undefined,
-    senderRole: (getTag('role') as any) ?? 'tourist',
+    senderRole: (getTag('role') as SOSPacket['senderRole']) ?? 'tourist',
     senderName: getTag('sender'),
     nostrEvent: event,
   };
 }
 
+/**
+ * Full zero-trust check: the event id must be the hash of its own contents,
+ * and the BIP-340 signature must verify against the embedded pubkey. A relay
+ * that alters a single tag, coordinate, or byte of content fails here.
+ */
 export function verifyNostrSOSEvent(event: NostrSOSEvent): boolean {
   if (!event || !event.id || !event.pubkey || !event.sig) return false;
   const expectedId = calculateNostrEventId(event.pubkey, event.created_at, event.kind, event.tags, event.content);
-  return expectedId === event.id && event.sig.length >= 64;
+  if (expectedId !== event.id) return false;
+  return verifyEventSignature(event.sig, event.id, event.pubkey);
+}
+
+/** Stable mesh-wide identity for a packet, used for relay deduplication. */
+export function meshEventId(packet: SOSPacket): string {
+  return packet.nostrEvent?.id ?? packet.packetId;
 }
 
 export function createSOSPacket(params: {
@@ -236,6 +296,11 @@ export function createChatPacket(params: {
   senderRole: 'tourist' | 'authority';
   senderName: string;
   text: string;
+  /** ISO-style language code of the text actually delivered to the recipient. */
+  language?: string;
+  /** Officer-authored original retained alongside an AI translation. */
+  originalText?: string;
+  originalLanguage?: string;
   latitude?: number;
   longitude?: number;
   originDeviceId?: string;
@@ -265,6 +330,9 @@ export function createChatPacket(params: {
     chatText: params.text,
     senderRole: params.senderRole,
     senderName: params.senderName,
+    chatLanguage: params.language,
+    originalText: params.originalText,
+    originalLanguage: params.originalLanguage,
   };
 
   packet.nostrEvent = toNostrSOSEvent(packet);
@@ -294,16 +362,16 @@ export function incrementPacketHop(packet: SOSPacket, relayDeviceId: string, tra
   if (!updatedPath.includes(relayDeviceId)) {
     updatedPath.push(relayDeviceId);
   }
-  const updatedPacket: SOSPacket = {
+  // The signed event is carried through untouched. A relay holds no key to
+  // re-sign with, and a mutating event id would defeat mesh deduplication, so
+  // hop and TTL live only in this transport envelope.
+  return {
     ...packet,
     ttl: Math.max(0, packet.ttl - 1),
     hopCount: packet.hopCount + 1,
     lastKnownTransport: transport,
     relayPath: updatedPath,
   };
-
-  updatedPacket.nostrEvent = toNostrSOSEvent(updatedPacket);
-  return updatedPacket;
 }
 
 export function serializeSOSPacket(packet: SOSPacket): string {
@@ -334,8 +402,8 @@ export function getOrCreateDeviceId(): string {
   }
 }
 
-export function getOrCreatePubkey(touristId: string): string {
-  const cleanId = touristId || 'TOUR-DEFAULT';
-  const hash = sha256(toUtf8Bytes(cleanId)).replace(/^0x/, '');
-  return hash.substring(0, 64);
-}
+/**
+ * This device's Nostr pubkey. Re-exported here so packet code has one import
+ * surface; the key itself is owned by nostrKeys.
+ */
+export { getDevicePubkey } from './nostrKeys';

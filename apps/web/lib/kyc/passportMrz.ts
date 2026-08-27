@@ -55,6 +55,53 @@ function parseMrzDate(yymmdd: string, kind: 'birth' | 'expiry'): string | null {
   return d.toISOString().slice(0, 10);
 }
 
+/** Pads or truncates a field to `length` using the MRZ filler character. */
+function mrzPad(value: string, length: number): string {
+  return value.slice(0, length).padEnd(length, '<');
+}
+
+/**
+ * Builds a check-digit-valid TD3 MRZ for sandbox enrolment, with a randomised
+ * document number on every call.
+ *
+ * A fixed specimen MRZ would hash to a single subject and make every sandbox
+ * passport enrolment resolve to one shared tourist record, so the document
+ * number must differ per traveller even when the demo name does not.
+ */
+export function buildSandboxMrz(): { line1: string; line2: string } {
+  const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  const bytes = new Uint8Array(9);
+  globalThis.crypto.getRandomValues(bytes);
+  const documentNumber = Array.from(bytes, (b) => ALPHABET[b % ALPHABET.length]).join('');
+
+  const nationality = 'UTO';
+  const dateOfBirth = '740812';
+  const sex = 'F';
+  // Five years out, so the specimen never ages into a "passport expired" error.
+  const expiryDate = (() => {
+    const d = new Date();
+    d.setUTCFullYear(d.getUTCFullYear() + 5);
+    return `${String(d.getUTCFullYear() % 100).padStart(2, '0')}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`;
+  })();
+  const personalNumber = mrzPad('', 14);
+
+  const documentCheck = String(mrzCheckDigit(documentNumber));
+  const dobCheck = String(mrzCheckDigit(dateOfBirth));
+  const expiryCheck = String(mrzCheckDigit(expiryDate));
+  const personalCheck = String(mrzCheckDigit(personalNumber));
+  const composite = String(mrzCheckDigit(
+    documentNumber + documentCheck + dateOfBirth + dobCheck + expiryDate + expiryCheck + personalNumber + personalCheck
+  ));
+
+  return {
+    line1: mrzPad(`P<${nationality}ERIKSSON<<ANNA<MARIA`, 44),
+    line2:
+      documentNumber + documentCheck + nationality +
+      dateOfBirth + dobCheck + sex + expiryDate + expiryCheck +
+      personalNumber + personalCheck + composite,
+  };
+}
+
 export interface MrzResult {
   documentType: string;
   issuingState: string;

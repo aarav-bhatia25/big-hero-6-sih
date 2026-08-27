@@ -53,7 +53,7 @@ pnpm dev:web
 
 Copy the relevant environment variables into `apps/web/.env.local`. Never place `ANCHOR_PRIVATE_KEY` or `SUPABASE_SERVICE_ROLE_KEY` in browser-exposed `NEXT_PUBLIC_*` variables.
 
-Before deployment, apply the additive SQL files in `supabase/migrations/` in numeric order. The emergency-contact, emergency profile, relay provenance, missing-person draft, durable incident chat, recovery-code, and authority-geofence flows require migrations `005` through `011`; `/api/health` reports exact missing tables or columns as `degraded` until they are present.
+Before deployment, apply the additive SQL files in `supabase/migrations/` in numeric order. The emergency-contact, emergency profile, relay provenance, missing-person draft, durable incident chat, recovery-code, and authority-geofence flows require migrations `005` through `012`; `/api/health` reports exact missing tables or columns as `degraded` until they are present.
 
 ## Key environment variables
 

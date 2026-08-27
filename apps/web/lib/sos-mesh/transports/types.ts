@@ -4,7 +4,13 @@
 
 import { SOSPacket } from '../sosPacket';
 
-export type TransportChannel = 'INTERNET' | 'BLE_RELAY' | 'LOCAL_QUEUE';
+/**
+ * PEER_MESH is a direct browser-to-browser WebRTC DataChannel link between two
+ * nearby devices. BLE_RELAY is a GATT write to a separately provisioned relay
+ * gateway. They are different links with different trust stories, so they are
+ * never reported under one name.
+ */
+export type TransportChannel = 'INTERNET' | 'PEER_MESH' | 'BLE_RELAY' | 'LOCAL_QUEUE';
 
 export interface TransportResult {
   success: boolean;

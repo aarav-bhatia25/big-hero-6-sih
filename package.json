@@ -13,7 +13,9 @@
     "lint": "pnpm --filter @prahari/web lint",
     "contract:compile": "pnpm --filter @prahari/contracts compile",
     "contract:deploy:sepolia": "pnpm --filter @prahari/contracts deploy:sepolia",
-    "identity:keygen": "node scripts/generate-identity-key.mjs"
+    "identity:keygen": "node scripts/generate-identity-key.mjs",
+    "mesh:demo": "pnpm --filter @prahari/web mesh:demo",
+    "test": "pnpm --filter @prahari/web test"
   },
   "packageManager": "pnpm@11.19.0"
 }

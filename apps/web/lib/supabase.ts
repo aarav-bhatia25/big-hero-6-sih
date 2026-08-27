@@ -19,7 +19,7 @@ export const REQUIRED_SUPABASE_TABLES = [
 
 /** Columns introduced by the durable emergency/identity feature migrations. */
 export const REQUIRED_SUPABASE_COLUMNS: Record<string, readonly string[]> = {
-  tourists: ['clothingProfile', 'touristAccessCodeHash', 'touristAccessCodeSalt'],
+  tourists: ['clothingProfile', 'touristAccessCodeHash', 'touristAccessCodeSalt', 'meshPubkeys'],
   incidents: [
     'emergencyContactNotifications',
     'cancelledAt',
@@ -36,6 +36,8 @@ export const REQUIRED_SUPABASE_COLUMNS: Record<string, readonly string[]> = {
     'emergencyIdentificationProfile',
     'emergencyIdentificationProfileSharedAt',
     'incidentMessages',
+    'meshRelayed',
+    'meshOriginPubkey',
   ],
 };
 

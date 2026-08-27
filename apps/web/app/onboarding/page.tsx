@@ -11,14 +11,11 @@ import OfflineAreaSetup from '@/components/offline/OfflineAreaSetup';
 import OfflineAreaDownload from '@/components/offline/OfflineAreaDownload';
 import type { OfflineMapSelection } from '@/lib/offlineMap';
 import { COMMUNICATION_LANGUAGES } from '@/lib/languages';
+import { generateSandboxAadhaar } from '@/lib/kyc/verhoeff';
+import { buildSandboxMrz } from '@/lib/kyc/passportMrz';
 
 type Method = 'aadhaar' | 'passport';
 type Step = 'method' | 'details' | 'otp' | 'consent' | 'done';
-
-const SPECIMEN = {
-  line1: ('P<UTO' + 'ERIKSSON<<ANNA<MARIA').padEnd(44, '<'),
-  line2: 'L898902C36UTO7408122F3404159ZE184226B<<<<<16',
-};
 
 export default function OnboardingPage() {
   const [step, setStep] = useState<Step>('method');
@@ -35,6 +32,12 @@ export default function OnboardingPage() {
   const [maskedTarget, setMaskedTarget] = useState('');
   const [sandboxOtp, setSandboxOtp] = useState('');
   const [otp, setOtp] = useState('');
+
+  // Set when the server reports that this document is already enrolled: the
+  // existing holder's recovery code must be presented before their record is
+  // overwritten.
+  const [requiresRecoveryCode, setRequiresRecoveryCode] = useState(false);
+  const [existingRecoveryCode, setExistingRecoveryCode] = useState('');
 
   const [trackingConsent, setTrackingConsent] = useState(true);
   const [contactName, setContactName] = useState('');
@@ -123,8 +126,15 @@ export default function OnboardingPage() {
           ? { emergencyContacts: [{ name: contactName || 'Emergency contact', phone: contactPhone, email: contactEmail, relationship: 'Primary' }] }
           : {}),
         ...(hotel ? { accommodation: { hotelName: hotel, address: '', city: '' } } : {}),
+        ...(existingRecoveryCode.trim() ? { recoveryAccessCode: existingRecoveryCode.trim() } : {}),
       });
-      if (!data.ok) { setError(data.error); return; }
+      if (!data.ok) {
+        setError(data.error);
+        if (data.requiresRecoveryCode) setRequiresRecoveryCode(true);
+        return;
+      }
+      setRequiresRecoveryCode(false);
+      setExistingRecoveryCode('');
 
       setProfileNotice(null);
       if (clothingPhoto || clothingNotes.trim()) {
@@ -249,9 +259,9 @@ export default function OnboardingPage() {
                   <p className="mt-1.5 text-xs text-ink-soft">
                     Validated with the Verhoeff checksum. Never stored — only a salted hash is kept.
                   </p>
-                  <button type="button" onClick={() => setAadhaar('234567890124')}
+                  <button type="button" onClick={() => setAadhaar(generateSandboxAadhaar())}
                     className="mt-2 text-xs font-semibold text-brand-600 underline">
-                    Use a valid sandbox number
+                    Generate a valid sandbox number
                   </button>
                 </div>
               </>
@@ -273,9 +283,9 @@ export default function OnboardingPage() {
                   The two 44-character lines at the bottom of the photo page. Check digits are
                   verified against ICAO 9303 — a mistyped line is rejected.
                 </p>
-                <button type="button" onClick={() => { setMrz1(SPECIMEN.line1); setMrz2(SPECIMEN.line2); }}
+                <button type="button" onClick={() => { const specimen = buildSandboxMrz(); setMrz1(specimen.line1); setMrz2(specimen.line2); }}
                   className="text-xs font-semibold text-brand-600 underline">
-                  Use the ICAO specimen passport
+                  Generate an ICAO specimen passport
                 </button>
               </>
             )}
@@ -420,6 +430,20 @@ export default function OnboardingPage() {
                 </span>
               </span>
             </label>
+
+            {requiresRecoveryCode && (
+              <label className="block rounded-nb border-2 border-amber-300 bg-amber-50 p-4 text-sm">
+                <span className="flex items-center gap-2 font-bold text-ink"><KeyRound size={16} /> This document is already enrolled</span>
+                <span className="mt-1.5 block text-xs leading-5 text-ink-soft">
+                  Enter the recovery code issued at the original enrolment to update that record.
+                  Without it the existing traveller&apos;s identity cannot be replaced.
+                </span>
+                <input type="password" value={existingRecoveryCode} required
+                  onChange={(e) => setExistingRecoveryCode(e.target.value)}
+                  placeholder="Recovery code from the original enrolment"
+                  className="nb-input mt-2 font-mono text-sm" />
+              </label>
+            )}
 
             <button type="submit" disabled={busy}
               className="minimal-button minimal-button-primary w-full disabled:opacity-60">

@@ -11,6 +11,7 @@ export type SOSState =
   | 'PACKET_CREATED'
   | 'LOCAL_PERSISTED'
   | 'TRY_INTERNET'
+  | 'TRY_PEER_MESH'
   | 'TRY_BLE_RELAY'
   | 'RELAYED'
   | 'DELIVERED'
@@ -20,13 +21,16 @@ export type SOSState =
   | 'DELIVERY_FAILED'
   | 'CANCELLED';
 
+/** Mirrors TransportChannel; kept local so the state machine stays dependency-free. */
+export type SOSTransportLabel = 'INTERNET' | 'PEER_MESH' | 'BLE_RELAY' | 'LOCAL_QUEUE';
+
 export interface SOSStateChangeEvent {
   previousState: SOSState;
   currentState: SOSState;
   timestamp: number;
   message?: string;
   incidentId?: string;
-  transport?: 'INTERNET' | 'BLE_RELAY' | 'LOCAL_QUEUE';
+  transport?: SOSTransportLabel;
   hopCount?: number;
 }
 
@@ -54,7 +58,7 @@ export class SOSStateMachine {
     meta?: {
       message?: string;
       incidentId?: string;
-      transport?: 'INTERNET' | 'BLE_RELAY' | 'LOCAL_QUEUE';
+      transport?: SOSTransportLabel;
       hopCount?: number;
     }
   ): SOSStateChangeEvent {

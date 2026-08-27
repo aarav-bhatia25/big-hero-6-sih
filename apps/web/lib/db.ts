@@ -220,6 +220,8 @@ const KNOWN_INCIDENT_DB_COLUMNS = new Set([
   'relayPath',
   'originDeviceId',
   'packetId',
+  'meshRelayed',
+  'meshOriginPubkey',
   'voiceStatement',
   'voiceStatementLanguage',
   'emergencyIdentificationProfile',

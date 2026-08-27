@@ -1,25 +1,30 @@
 'use client';
 
-import React, { useState, Suspense } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Building2,
-  Lock,
   Mail,
   KeyRound,
   AlertTriangle,
   QrCode,
   Smartphone,
+  ArrowRight,
+  ShieldCheck,
+  Zap,
 } from 'lucide-react';
 
 function LoginFormContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirect = searchParams.get('redirect') || '';
+  const roleParam = searchParams.get('role');
   const errorParam = searchParams.get('error');
 
-  const [activeTab, setActiveTab] = useState<'staff' | 'tourist'>('staff');
+  const [activeTab, setActiveTab] = useState<'staff' | 'tourist'>(
+    roleParam === 'tourist' ? 'tourist' : 'staff'
+  );
 
   // Staff Form State
   const [email, setEmail] = useState('');
@@ -35,7 +40,7 @@ function LoginFormContent() {
   const [touristLoading, setTouristLoading] = useState(false);
   const [touristError, setTouristError] = useState<string | null>(null);
 
-  React.useEffect(() => {
+  useEffect(() => {
     fetch('/api/auth/me')
       .then((res) => res.json())
       .then((data) => {
@@ -48,8 +53,6 @@ function LoginFormContent() {
             && (!isAuthorityRoute || role === 'admin' || role === 'authority')
             && (!isResponderRoute || role === 'responder' || role === 'admin' || role === 'authority');
 
-          // Do not send a tourist back to a staff-only URL after an authority
-          // session expires or is replaced in another browser tab.
           if (canUseRequestedRoute) {
             router.replace(safeRedirect as any);
           } else if (role === 'admin' || role === 'authority') {
@@ -88,7 +91,7 @@ function LoginFormContent() {
     }
   };
 
-  const handleEvaluatorOneClickLogin = async (role: 'authority' | 'responder' = 'authority') => {
+  const handleQuickDemoLogin = async (role: 'authority' | 'responder') => {
     setStaffLoading(true);
     setStaffError(null);
     try {
@@ -100,7 +103,7 @@ function LoginFormContent() {
       });
       const data = await res.json();
       if (!data.success) {
-        setStaffError(data.error || 'Evaluator mode login failed.');
+        setStaffError(data.error || 'Demo login failed.');
         return;
       }
       const targetRoute = redirect || (role === 'responder' ? '/dashboard' : '/authority');
@@ -139,184 +142,205 @@ function LoginFormContent() {
 
   return (
     <div className="minimal-page min-h-screen flex flex-col justify-between font-sans">
-      <div className="minimal-nav">
-        <Link href="/" className="text-xl font-semibold tracking-tight text-ink">
+      <header className="minimal-nav">
+        <Link href="/" className="ui-display text-2xl font-medium tracking-tight text-ink">
           Prahari
         </Link>
-      </div>
+        <Link href="/onboarding" className="minimal-text-link">
+          Create Tourist ID
+        </Link>
+      </header>
 
-      <main className="flex-1 flex items-center justify-center p-4 md:p-8">
-        <div className="w-full max-w-md space-y-5">
+      <main className="flex-1 flex items-center justify-center p-4 sm:p-6 md:p-8">
+        <div className="w-full max-w-md space-y-6">
           <div className="text-center space-y-2">
-            <h1 className="ui-display text-3xl text-ink">Sign in to Prahari</h1>
-            <p className="text-base text-ink-soft">Choose the access type that applies to you.</p>
-          </div>
-
-          {/* Evaluator Mode Banner */}
-          <div className="minimal-card p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-emerald-600 animate-ping" />
-                <span className="minimal-eyebrow">Evaluator Demo Mode</span>
-              </div>
-              <span className="nb-chip nb-chip-accent text-[10px] py-0.5 px-2 font-mono">
-                SIH Evaluation Ready
-              </span>
-            </div>
-            <p className="text-xs text-ink-soft">
-              One-click instant login for evaluators and judges to test authority dashboards.
+            <h1 className="ui-display text-3xl sm:text-4xl text-ink font-normal tracking-tight">
+              Sign in to Prahari
+            </h1>
+            <p className="text-sm text-ink-soft">
+              Access your authority command desk or traveller portal.
             </p>
-            <div className="grid grid-cols-2 gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => handleEvaluatorOneClickLogin('authority')}
-                disabled={staffLoading}
-                className="minimal-button minimal-button-primary text-xs w-full"
-              >
-                <Building2 className="w-4 h-4" />
-                <span>Authority Desk</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleEvaluatorOneClickLogin('responder')}
-                disabled={staffLoading}
-                className="minimal-button minimal-button-secondary text-xs w-full"
-              >
-                <Smartphone className="w-4 h-4" />
-                <span>Responder Unit</span>
-              </button>
-            </div>
           </div>
 
-          <Link href="/onboarding" className="minimal-button minimal-button-primary w-full">
-            New traveller? Create your Digital Tourist ID <span aria-hidden>→</span>
-          </Link>
-
-          <div className="minimal-card !min-h-0 p-5 md:p-6 space-y-5">
-            {/* Tabs */}
-            <div className="grid grid-cols-2 gap-2">
+          <div className="minimal-card p-6 space-y-6">
+            {/* Clean Segmented Tab Switcher */}
+            <div className="grid grid-cols-2 gap-1.5 p-1 bg-surface-2 rounded-xl border border-border">
               <button
                 type="button"
                 onClick={() => setActiveTab('staff')}
-                className={`minimal-button text-xs ${activeTab === 'staff' ? 'minimal-button-primary' : 'minimal-button-secondary'}`}
+                className={`flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-semibold transition-all ${
+                  activeTab === 'staff'
+                    ? 'bg-surface text-ink shadow-sm border border-border'
+                    : 'text-ink-soft hover:text-ink'
+                }`}
               >
-                <Building2 className="w-4 h-4" /> Staff &amp; Authority
+                <Building2 className="w-3.5 h-3.5" />
+                <span>Authority &amp; Staff</span>
               </button>
               <button
                 type="button"
                 onClick={() => setActiveTab('tourist')}
-                className={`minimal-button text-xs ${activeTab === 'tourist' ? 'minimal-button-primary' : 'minimal-button-secondary'}`}
+                className={`flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-semibold transition-all ${
+                  activeTab === 'tourist'
+                    ? 'bg-surface text-ink shadow-sm border border-border'
+                    : 'text-ink-soft hover:text-ink'
+                }`}
               >
-                <Smartphone className="w-4 h-4" /> Tourist &amp; Citizen
+                <Smartphone className="w-3.5 h-3.5" />
+                <span>Tourist &amp; Citizen</span>
               </button>
             </div>
 
-            {/* STAFF */}
+            {/* STAFF LOGIN */}
             {activeTab === 'staff' && (
-              <form onSubmit={handleStaffLogin} className="space-y-4 text-xs">
+              <form onSubmit={handleStaffLogin} className="space-y-4">
                 {staffError && (
-                  <div className="nb-card-flat bg-danger/10 border-danger p-3 flex items-center gap-2 font-bold" style={{ color: 'var(--nb-ink)' }}>
-                    <AlertTriangle className="w-4 h-4 shrink-0 text-danger" />
+                  <div className="p-3 rounded-lg bg-danger/10 border border-danger text-xs font-medium flex items-center gap-2 text-ink">
+                    <AlertTriangle className="w-4 h-4 text-danger shrink-0" />
                     <span>{staffError}</span>
                   </div>
                 )}
+
                 <div className="space-y-1.5">
-                  <label className="block font-bold uppercase tracking-wider text-[11px]">Authority account email</label>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-ink-soft">
+                    Officer Email
+                  </label>
                   <div className="relative">
-                    <Mail className="w-4 h-4 text-ink-soft absolute left-3 top-3 z-10" />
+                    <Mail className="w-4 h-4 text-ink-soft absolute left-3 top-3.5 z-10" />
                     <input
-                      type="email" required placeholder="officer.sharma@police.gov.in"
-                      value={email} onChange={(e) => setEmail(e.target.value)}
-                      className="nb-input pl-9 font-mono text-xs"
+                      type="email"
+                      required
+                      placeholder="officer.sharma@police.gov.in"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="nb-input pl-9 text-xs font-mono"
                     />
                   </div>
                 </div>
+
                 <div className="space-y-1.5">
-                  <label className="block font-bold uppercase tracking-wider text-[11px]">Password</label>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-ink-soft">
+                    Password
+                  </label>
                   <div className="relative">
-                    <KeyRound className="w-4 h-4 text-ink-soft absolute left-3 top-3 z-10" />
+                    <KeyRound className="w-4 h-4 text-ink-soft absolute left-3 top-3.5 z-10" />
                     <input
-                      type="password" required placeholder="••••••••••••"
-                      value={password} onChange={(e) => setPassword(e.target.value)}
-                      className="nb-input pl-9 font-mono text-xs"
+                      type="password"
+                      required
+                      placeholder="••••••••••••"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="nb-input pl-9 text-xs font-mono"
                     />
                   </div>
                 </div>
-                <button type="submit" disabled={staffLoading} className="minimal-button minimal-button-primary w-full !py-3">
-                  {staffLoading ? 'Verifying credentials…' : 'Sign in to authority desk'}
+
+                <button
+                  type="submit"
+                  disabled={staffLoading}
+                  className="minimal-button minimal-button-primary w-full !py-3 text-xs"
+                >
+                  {staffLoading ? 'Verifying credentials…' : 'Sign in to Authority Desk'}
                 </button>
 
-                <div className="nb-card-flat bg-surface-2 p-3 text-xs space-y-2 mt-4 border border-border">
-                  <div className="flex items-center justify-between font-bold text-ink">
-                    <span>⚡ Demo Authority Credentials</span>
-                    <span className="nb-chip text-[10px] py-0.5 px-2">Pre-Configured</span>
+                {/* Quick Demo Login Option */}
+                <div className="pt-3 border-t border-border space-y-2">
+                  <div className="flex items-center justify-between text-[11px] text-ink-soft">
+                    <span className="flex items-center gap-1 font-medium text-ink">
+                      <Zap className="w-3 h-3 text-amber-600" /> Demo Quick Access
+                    </span>
+                    <span>Evaluation ready</span>
                   </div>
-                  <p className="text-[11px] text-ink-soft">
-                    Email: <code className="font-mono bg-surface px-1.5 py-0.5 rounded border border-border text-ink">officer.sharma@police.gov.in</code><br />
-                    Password: <code className="font-mono bg-surface px-1.5 py-0.5 rounded border border-border text-ink">Prahari@123</code>
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEmail('officer.sharma@police.gov.in');
-                      setPassword('Prahari@123');
-                    }}
-                    className="minimal-button minimal-button-secondary w-full text-xs !min-h-[2.2rem]"
-                  >
-                    Auto-Fill Demo Credentials
-                  </button>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleQuickDemoLogin('authority')}
+                      disabled={staffLoading}
+                      className="minimal-button minimal-button-secondary text-xs w-full !py-2"
+                    >
+                      <span>Authority Demo</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleQuickDemoLogin('responder')}
+                      disabled={staffLoading}
+                      className="minimal-button minimal-button-secondary text-xs w-full !py-2"
+                    >
+                      <span>Responder Demo</span>
+                    </button>
+                  </div>
                 </div>
               </form>
             )}
 
-            {/* TOURIST */}
+            {/* TOURIST LOGIN */}
             {activeTab === 'tourist' && (
-              <form onSubmit={handleTouristLogin} className="space-y-4 text-xs">
+              <form onSubmit={handleTouristLogin} className="space-y-4">
                 {touristError && (
-                  <div className="nb-card-flat bg-danger/10 border-danger p-3 flex items-center gap-2 font-bold">
-                    <AlertTriangle className="w-4 h-4 shrink-0 text-danger" />
+                  <div className="p-3 rounded-lg bg-danger/10 border border-danger text-xs font-medium flex items-center gap-2 text-ink">
+                    <AlertTriangle className="w-4 h-4 text-danger shrink-0" />
                     <span>{touristError}</span>
                   </div>
                 )}
+
                 <div className="space-y-1.5">
-                  <label className="block font-bold uppercase tracking-wider text-[11px]">
-                    Digital Tourist ID (DID) or Tourist ID
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-ink-soft">
+                    Digital Tourist ID (DID)
                   </label>
                   <div className="relative">
-                    <QrCode className="w-4 h-4 text-ink-soft absolute left-3 top-3 z-10" />
+                    <QrCode className="w-4 h-4 text-ink-soft absolute left-3 top-3.5 z-10" />
                     <input
-                      type="text" required placeholder="did:prahari:... or DTI-IND-..."
-                      value={touristIdentifier} onChange={(e) => setTouristIdentifier(e.target.value)}
-                      className="nb-input pl-9 font-mono text-xs"
+                      type="text"
+                      required
+                      placeholder="did:prahari:... or DTI-IND-..."
+                      value={touristIdentifier}
+                      onChange={(e) => setTouristIdentifier(e.target.value)}
+                      className="nb-input pl-9 text-xs font-mono"
                     />
                   </div>
-                  <p className="text-[10px] text-ink-soft">
-                    Your ID identifies the record; it is not a secret.
-                  </p>
                 </div>
+
                 <div className="space-y-1.5">
-                  <label className="block font-bold uppercase tracking-wider text-[11px]">Onboarding recovery code</label>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-ink-soft">
+                    Onboarding Recovery Code
+                  </label>
                   <div className="relative">
-                    <KeyRound className="w-4 h-4 text-ink-soft absolute left-3 top-3 z-10" />
+                    <KeyRound className="w-4 h-4 text-ink-soft absolute left-3 top-3.5 z-10" />
                     <input
-                      type="password" required placeholder="Saved during enrolment"
-                      value={touristRecoveryCode} onChange={(e) => setTouristRecoveryCode(e.target.value)}
-                      className="nb-input pl-9 font-mono text-xs"
+                      type="password"
+                      required
+                      placeholder="Saved during enrolment"
+                      value={touristRecoveryCode}
+                      onChange={(e) => setTouristRecoveryCode(e.target.value)}
+                      className="nb-input pl-9 text-xs font-mono"
                     />
                   </div>
-                  <p className="text-[10px] text-ink-soft">The code is shown once after verified onboarding and is stored server-side only as a salted verifier.</p>
                 </div>
-                <button type="submit" disabled={touristLoading} className="minimal-button minimal-button-primary w-full !py-3">
-                  {touristLoading ? 'Restoring session…' : 'Open traveller safety hub'}
+
+                <button
+                  type="submit"
+                  disabled={touristLoading}
+                  className="minimal-button minimal-button-primary w-full !py-3 text-xs"
+                >
+                  {touristLoading ? 'Restoring session…' : 'Open Traveller Safety Hub'}
                 </button>
+
+                <div className="pt-3 border-t border-border text-center">
+                  <Link
+                    href="/onboarding"
+                    className="text-xs text-ink-soft hover:text-ink font-medium inline-flex items-center gap-1"
+                  >
+                    <span>Need a Digital Tourist ID? Create one</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </Link>
+                </div>
               </form>
             )}
           </div>
 
-          <div className="text-center text-[11px] text-ink-soft flex items-center justify-center gap-2">
-            <Lock className="w-3.5 h-3.5" />
-            <span>Demo environment · Do not enter real identity documents</span>
-          </div>
+          <p className="text-center text-xs text-ink-soft">
+            Demo Environment · Prahari Tourist Safety Platform
+          </p>
         </div>
       </main>
     </div>
@@ -325,7 +349,7 @@ function LoginFormContent() {
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-bg text-ink flex items-center justify-center font-mono">Loading authentication portal...</div>}>
+    <Suspense fallback={<div className="min-h-screen bg-bg text-ink flex items-center justify-center font-mono text-xs">Loading login portal...</div>}>
       <LoginFormContent />
     </Suspense>
   );

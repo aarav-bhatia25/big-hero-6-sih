@@ -39,14 +39,23 @@ export default function DigitalIdCard({ tourist }: { tourist: DigitalIdTourist |
   const [showQr, setShowQr] = useState<boolean>(false);
 
   const did = tourist?.did ?? null;
+  const anchorTxHash = tourist?.anchorTxHash ?? null;
+  const anchorExplorer = chainLabel(tourist?.anchorChainId).explorer;
+  /** Anchored credentials point the QR at the public explorer receipt; everything
+   *  else falls back to the hosted verify page (never a localhost origin). */
+  const anchorTxUrl = anchorTxHash && anchorExplorer ? `${anchorExplorer}${anchorTxHash}` : null;
 
   useEffect(() => {
     if (!did) { setQrCodeUrl(''); return; }
-    const verificationUrl = new URL(`/verify/${encodeURIComponent(did)}`, window.location.origin);
-    if (tourist?.credentialHash) verificationUrl.searchParams.set('h', tourist.credentialHash);
-    const payload = verificationUrl.toString();
+    let payload = anchorTxUrl;
+    if (!payload) {
+      const base = process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
+      const verificationUrl = new URL(`/verify/${encodeURIComponent(did)}`, base);
+      if (tourist?.credentialHash) verificationUrl.searchParams.set('h', tourist.credentialHash);
+      payload = verificationUrl.toString();
+    }
     generateDigitalIdQr(payload).then(setQrCodeUrl).catch(console.error);
-  }, [did, tourist?.credentialHash]);
+  }, [did, tourist?.credentialHash, anchorTxUrl]);
 
   if (!tourist || !did) {
     return (
@@ -69,7 +78,7 @@ export default function DigitalIdCard({ tourist }: { tourist: DigitalIdTourist |
 
   const isSandbox = Boolean(tourist.credential?.sandbox);
   const revoked = tourist.credentialStatus === 'revoked' || tourist.credentialStatus === 'suspended';
-  const anchor = tourist.anchorTxHash ? chainLabel(tourist.anchorChainId) : null;
+  const anchor = anchorTxHash ? chainLabel(tourist.anchorChainId) : null;
 
   return (
     <section className="minimal-card relative p-6 text-ink">
@@ -135,7 +144,9 @@ export default function DigitalIdCard({ tourist }: { tourist: DigitalIdTourist |
             <div className="w-44 h-44 flex items-center justify-center text-ink-soft text-xs">Generating QR...</div>
           )}
           <p className="text-[11px] text-ink-soft text-center mt-1 max-w-sm">
-            Scan opens a verification link with this credential’s cryptographic claim hash. It confirms active status without placing your profile, emergency contacts, or location in the QR code.
+            {anchorTxUrl
+              ? <>Scan opens the {anchor?.name ?? 'blockchain'} explorer receipt for the anchoring transaction, where this credential’s hash can be checked against the on-chain record. No profile, emergency contact, or location data is in the QR code.</>
+              : <>Scan opens a verification link with this credential’s cryptographic claim hash. It confirms active status without placing your profile, emergency contacts, or location in the QR code.</>}
           </p>
         </div>
       ) : (
@@ -147,7 +158,7 @@ export default function DigitalIdCard({ tourist }: { tourist: DigitalIdTourist |
             <span className="mb-1 block text-xs text-ink-soft">
               Verification
             </span>
-            <span className="flex items-center gap-1 text-sm font-medium text-emerald-300">
+            <span className="flex items-center gap-1 text-sm font-medium text-emerald-700">
               <UserCheck className="w-3.5 h-3.5" />
               {tourist.kycMethod === 'passport' ? 'Passport MRZ' : 'Aadhaar'} verified
             </span>

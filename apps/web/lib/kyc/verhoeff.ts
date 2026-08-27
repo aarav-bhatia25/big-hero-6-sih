@@ -32,6 +32,9 @@ const P = [
   [7, 0, 4, 6, 9, 1, 3, 2, 5, 8],
 ];
 
+// Inverse table over D5, used to derive a check digit rather than verify one.
+const INV = [0, 4, 3, 2, 1, 5, 6, 7, 8, 9];
+
 /** True when the digit string carries a valid Verhoeff check digit. */
 export function verhoeffValidate(digits: string): boolean {
   if (!/^\d+$/.test(digits)) return false;
@@ -41,6 +44,38 @@ export function verhoeffValidate(digits: string): boolean {
     c = D[c][P[i % 8][Number(reversed[i])]];
   }
   return c === 0;
+}
+
+/**
+ * The digit that makes `digits` Verhoeff-valid when appended. Same tables as
+ * verhoeffValidate, with the permutation index shifted by one because the
+ * check digit will occupy position 0 of the reversed string.
+ */
+export function verhoeffCheckDigit(digits: string): number {
+  if (!/^\d+$/.test(digits)) return -1;
+  let c = 0;
+  const reversed = digits.split('').reverse();
+  for (let i = 0; i < reversed.length; i++) {
+    c = D[c][P[(i + 1) % 8][Number(reversed[i])]];
+  }
+  return INV[c];
+}
+
+/**
+ * A fresh, checksum-valid Aadhaar number for sandbox enrolment.
+ *
+ * Every call returns a different number, and that is the point: identity
+ * issuance deduplicates on a salted hash of the document number, so a shared
+ * demo number makes every sandbox enrolment resolve to one tourist record and
+ * overwrite the previous holder's name, DID and recovery code.
+ */
+export function generateSandboxAadhaar(): string {
+  const bytes = new Uint8Array(11);
+  globalThis.crypto.getRandomValues(bytes);
+  // UIDAI never issues numbers beginning with 0 or 1.
+  let body = String(2 + (bytes[0] % 8));
+  for (let i = 1; i < 11; i++) body += String(bytes[i] % 10);
+  return body + String(verhoeffCheckDigit(body));
 }
 
 export type AadhaarValidation =

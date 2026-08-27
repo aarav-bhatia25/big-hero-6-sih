@@ -1,8 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { Siren, CheckCircle2, Loader2, Radio, XCircle } from 'lucide-react';
 import OfflineEmergencyChat from '@/components/tourist/OfflineEmergencyChat';
+
+// WebRTC pairing code is only needed by travellers who open the panel, so it
+// stays out of the main SOS bundle.
+const PeerMeshConnect = dynamic(() => import('@/components/tourist/PeerMeshConnect'), { ssr: false });
 
 interface SosButtonProps {
   touristPos?: { lat: number; lng: number };
@@ -26,6 +31,33 @@ export default function SosButton({
   const [bleError, setBleError] = useState<string | null>(null);
 
   const canDispatch = Boolean(touristId);
+
+  // Publish this device's mesh public key against the traveller's record. This
+  // is what later lets a stranger's phone relay their SOS: the gateway trusts
+  // the origin signature, and this is how it learns which keys count. The
+  // secret half never leaves this browser.
+  useEffect(() => {
+    if (!touristId) return;
+    let abandoned = false;
+
+    void (async () => {
+      try {
+        const { getDevicePubkey } = await import('@/lib/sos-mesh/nostrKeys');
+        const pubkey = getDevicePubkey();
+        if (!pubkey || abandoned) return;
+        await fetch('/api/identity/mesh-key', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ touristId, pubkey }),
+        });
+      } catch {
+        // An enhancement, not a dependency. Direct delivery and the local retry
+        // queue work whether or not this registration succeeds.
+      }
+    })();
+
+    return () => { abandoned = true; };
+  }, [touristId]);
 
   const setUpOptionalBleGateway = async () => {
     try {
@@ -170,6 +202,16 @@ export default function SosButton({
         {bleError && <p role="alert" className="mt-3 border-t border-line pt-3 text-rose-700">{bleError}</p>}
       </details>
 
+      <details className="mb-5 rounded-lg border border-line bg-surface-2 px-3 py-2.5 text-xs text-ink-soft">
+        <summary className="cursor-pointer select-none font-medium text-ink">Pair a nearby device (offline peer mesh)</summary>
+        <p className="mt-3 border-t border-line pt-3 leading-5">
+          Links this phone directly to another Prahari device over local Wi‑Fi or a hotspot, with no internet in between. If you lose signal, your SOS is handed to that device — signed by this one, so it can carry it out but cannot alter it — and uploaded as soon as it finds a network.
+        </p>
+        <div className="mt-3">
+          <PeerMeshConnect />
+        </div>
+      </details>
+
       {error && <div role="alert" className="mb-4 rounded border border-danger/50 bg-danger/10 px-3 py-2.5 text-xs font-medium text-ink">{error}</div>}
 
       {activeSos ? (
@@ -180,9 +222,11 @@ export default function SosButton({
               <span className="text-sm font-semibold text-ink">
                 {activeSos.transportType === 'INTERNET'
                   ? 'SOS sent to the authority queue'
-                  : activeSos.transportType === 'BLE_RELAY'
-                    ? 'SOS accepted by a BLE relay — authority delivery pending'
-                    : 'SOS stored locally — awaiting delivery'}
+                  : activeSos.transportType === 'PEER_MESH'
+                    ? 'SOS handed to a nearby device — authority delivery pending'
+                    : activeSos.transportType === 'BLE_RELAY'
+                      ? 'SOS accepted by a BLE relay — authority delivery pending'
+                      : 'SOS stored locally — awaiting delivery'}
               </span>
             </div>
             <div className="flex items-center gap-2">
@@ -228,7 +272,11 @@ export default function SosButton({
             className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-red-400/70 px-4 py-3 text-sm font-semibold text-red-300 transition hover:bg-red-500/10 disabled:opacity-60">
             <XCircle className="w-4 h-4" /> {loading ? 'Cancelling alert…' : 'Cancel false alarm'}
           </button>}
-          <p className="mt-2 text-center text-xs text-ink-soft">{activeSos.transportType === 'BLE_RELAY' ? 'A paired relay may upload this SOS later. Contact emergency services directly if you need immediate help.' : 'Only cancel if you are safe.'}</p>
+          <p className="mt-2 text-center text-xs text-ink-soft">{activeSos.transportType === 'BLE_RELAY'
+            ? 'A paired relay may upload this SOS later. Contact emergency services directly if you need immediate help.'
+            : activeSos.transportType === 'PEER_MESH'
+              ? 'Cancelling clears this device’s copy. A nearby device already holds the alert and may still upload it. Contact emergency services directly if you need immediate help.'
+              : 'Only cancel if you are safe.'}</p>
         </div>
       ) : (
         <div className="flex flex-col items-center justify-center py-2">

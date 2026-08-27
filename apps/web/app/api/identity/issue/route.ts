@@ -7,7 +7,7 @@ import {
 import { createSessionToken, setSessionCookie } from "@/lib/auth/session";
 import { anchorCredential } from "@/lib/blockchain/registry";
 import { isCommunicationLanguageCode } from '@/lib/languages';
-import { hashPassword } from '@/lib/auth/crypto';
+import { hashPassword, verifyPassword } from '@/lib/auth/crypto';
 import { randomBytes } from 'node:crypto';
 
 export const dynamic = "force-dynamic";
@@ -20,7 +20,7 @@ function makeTouristId(nationalityCode: string, subjectHash: string): string {
 
 export async function POST(request: NextRequest) {
   try {
-    const { sessionId, otp, emergencyContacts, accommodation, itinerary, visitEndsAt, trackingConsent, communicationLanguage } = await request.json();
+    const { sessionId, otp, emergencyContacts, accommodation, itinerary, visitEndsAt, trackingConsent, communicationLanguage, recoveryAccessCode: suppliedRecoveryAccessCode } = await request.json();
     if (!sessionId) {
       return NextResponse.json({ ok: false, error: "sessionId is required." }, { status: 400 });
     }
@@ -50,6 +50,33 @@ export async function POST(request: NextRequest) {
     // Same document -> same DID. Re-enrolment updates rather than duplicates.
     const existing = await getTouristBySubjectHash(subject.subjectHash);
     const touristId = existing?.touristId ?? makeTouristId(subject.nationalityCode, subject.subjectHash);
+
+    // Re-enrolment overwrites the record this document already points at —
+    // its name, DID, credential and recovery code. Presenting the document is
+    // not enough to authorise that, or anyone re-running onboarding with a
+    // number someone else already used would take over their identity and
+    // lock them out. The holder must prove possession of the current code.
+    if (existing?.touristAccessCodeHash && existing?.touristAccessCodeSalt) {
+      const suppliedRecoveryCode = String(suppliedRecoveryAccessCode ?? '').trim();
+      if (!suppliedRecoveryCode) {
+        return NextResponse.json({
+          ok: false,
+          error: 'This document is already enrolled. Enter the recovery code issued at that enrolment to update the existing record.',
+          requiresRecoveryCode: true,
+        }, { status: 409 });
+      }
+      if (
+        suppliedRecoveryCode.length > 200 ||
+        !verifyPassword(suppliedRecoveryCode, existing.touristAccessCodeHash, existing.touristAccessCodeSalt)
+      ) {
+        return NextResponse.json({
+          ok: false,
+          error: 'That recovery code does not match the enrolment already held for this document.',
+          requiresRecoveryCode: true,
+        }, { status: 401 });
+      }
+    }
+
     if (communicationLanguage !== undefined && !isCommunicationLanguageCode(communicationLanguage)) {
       return NextResponse.json({ ok: false, error: 'Choose a supported preferred communication language.' }, { status: 400 });
     }

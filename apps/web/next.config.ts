@@ -18,6 +18,9 @@ for (const name of [
   'OPENAI_API_KEY',
   'OPENAI_VISION_MODEL',
   'OPENAI_TEXT_MODEL',
+  'RESEND_API_KEY',
+  'EMERGENCY_FROM_EMAIL',
+  'EMERGENCY_ALERT_RECIPIENT',
 ]) {
   if (!process.env[name] && rootEnv[name]) {
     process.env[name] = rootEnv[name];
