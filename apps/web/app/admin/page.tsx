@@ -23,6 +23,9 @@ import AIIncidentBrief from '@/components/authority/AIIncidentBrief';
 import MissingPersonDraftPanel from '@/components/authority/MissingPersonDraftPanel';
 import { languageCodeFromPreference, travellerLanguageLabel } from '@/lib/languages';
 import { subscribeToPrahariLive } from '@/lib/supabaseRealtime';
+import dynamic from 'next/dynamic';
+
+const GeofencePickerMap = dynamic(() => import('@/components/maps/GeofencePickerMap'), { ssr: false });
 
 type DashboardStats = {
   activeTourists: number;
@@ -713,7 +716,42 @@ export default function AdminPage() {
                 <label className="block sm:col-span-2"><span className="text-sm font-medium text-ink">Zone name</span><input required value={geofenceForm.name} onChange={(event) => setGeofenceForm((current) => ({ ...current, name: event.target.value }))} className="nb-input mt-2 text-sm" placeholder="e.g. Restricted area name" /></label>
                 <label className="block"><span className="text-sm font-medium text-ink">Type</span><select value={geofenceForm.type} onChange={(event) => setGeofenceForm((current) => ({ ...current, type: event.target.value }))} className="nb-input mt-2 text-sm"><option value="high_risk">High-risk area</option><option value="restricted">Restricted area</option><option value="pickpocket_hotspot">Pickpocket hotspot</option><option value="disaster_prone">Disaster-prone area</option><option value="tourist_only">Tourist-only zone</option><option value="safe_zone">Safe zone</option></select></label>
                 <label className="block"><span className="text-sm font-medium text-ink">Severity</span><select value={geofenceForm.severity} onChange={(event) => setGeofenceForm((current) => ({ ...current, severity: event.target.value }))} className="nb-input mt-2 text-sm"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="critical">Critical</option></select></label>
-                <label className="block sm:col-span-2"><span className="text-sm font-medium text-ink">Boundary coordinates</span><textarea required rows={6} value={geofenceForm.coordinates} onChange={(event) => setGeofenceForm((current) => ({ ...current, coordinates: event.target.value }))} className="nb-input mt-2 font-mono text-sm" placeholder={'latitude, longitude\nlatitude, longitude\nlatitude, longitude'} /><span className="mt-2 block text-xs leading-5 text-ink-soft">Enter at least three corner pairs, one per line. The boundary closes automatically when saved.</span></label>
+                {/* Interactive Map Picker */}
+                <div className="block sm:col-span-2 space-y-1">
+                  <span className="text-sm font-medium text-ink">Choose boundary points on map</span>
+                  <GeofencePickerMap
+                    points={geofenceForm.coordinates
+                      .split('\n')
+                      .map((line) => {
+                        const parts = line.split(',').map((s) => parseFloat(s.trim()));
+                        return parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])
+                          ? [parts[0], parts[1]] as [number, number]
+                          : null;
+                      })
+                      .filter((pt): pt is [number, number] => pt !== null)}
+                    onAddPoint={(pt) => {
+                      const newLine = `${pt[0]}, ${pt[1]}`;
+                      setGeofenceForm((prev) => ({
+                        ...prev,
+                        coordinates: prev.coordinates ? `${prev.coordinates.trim()}\n${newLine}` : newLine,
+                      }));
+                    }}
+                    onRemoveLastPoint={() => {
+                      const lines = geofenceForm.coordinates.trim().split('\n').filter(Boolean);
+                      lines.pop();
+                      setGeofenceForm((prev) => ({ ...prev, coordinates: lines.join('\n') }));
+                    }}
+                    onClearPoints={() => {
+                      setGeofenceForm((prev) => ({ ...prev, coordinates: '' }));
+                    }}
+                  />
+                </div>
+
+                <label className="block sm:col-span-2">
+                  <span className="text-sm font-medium text-ink">Boundary coordinates <span className="font-normal text-ink-soft">(auto-updates when clicking map above)</span></span>
+                  <textarea required rows={3} value={geofenceForm.coordinates} onChange={(event) => setGeofenceForm((current) => ({ ...current, coordinates: event.target.value }))} className="nb-input mt-2 font-mono text-xs" placeholder={'latitude, longitude\nlatitude, longitude\nlatitude, longitude'} />
+                  <span className="mt-1 block text-xs leading-5 text-ink-soft">Click points on the map above or edit coordinates directly. Enter at least three corner pairs.</span>
+                </label>
                 <label className="block sm:col-span-2"><span className="text-sm font-medium text-ink">Operational note <span className="font-normal text-ink-soft">(optional)</span></span><input value={geofenceForm.description} onChange={(event) => setGeofenceForm((current) => ({ ...current, description: event.target.value }))} className="nb-input mt-2 text-sm" placeholder="Reason or source for this boundary" /></label>
               </div>
 

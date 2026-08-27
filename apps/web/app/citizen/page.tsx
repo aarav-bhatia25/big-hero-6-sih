@@ -610,26 +610,32 @@ export default function CitizenPage() {
 
       {/* Police-ready incident draft */}
       {activeModal === 'efir' && (
-        <div className="fixed inset-0 z-50 bg-surface-2/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-lg rounded-nb border-2 border-line bg-surface p-6 shadow-nb relative text-ink space-y-4">
-            <button
-              onClick={() => setActiveModal('none')}
-              className="absolute top-4 right-4 text-ink-soft hover:text-ink p-1 bg-surface-2 rounded cursor-pointer border-2 border-line"
-            >
-              <X className="w-5 h-5" />
-            </button>
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-stone-950/40 p-4 sm:p-6 backdrop-blur-sm" role="dialog" aria-modal="true">
+          <div className="flex min-h-full items-center justify-center py-6 sm:py-10">
+            <div className="relative w-full max-w-lg rounded-2xl border border-line bg-surface p-5 sm:p-7 shadow-2xl text-ink space-y-5 my-auto">
+              <button
+                onClick={() => setActiveModal('none')}
+                className="minimal-button minimal-button-secondary absolute top-4 right-4 !p-2 !min-h-0 cursor-pointer"
+                aria-label="Close modal"
+              >
+                <X className="w-4 h-4" />
+              </button>
 
-            <div className="flex items-center gap-3 border-b-2 border-line pb-3">
-              <div className="p-2.5 bg-accent text-accent-ink rounded">
-                <FileText className="w-6 h-6" />
+            <div className="flex items-center gap-3 border-b border-line pb-4">
+              <div className="p-2.5 rounded-xl border border-line bg-surface-2 text-ink">
+                <FileText className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="font-serif font-bold text-lg text-ink">Police-ready incident draft</h3>
-                <p className="text-xs text-ink-soft font-mono">BNSS 2023, section 173 · not a police receipt</p>
+                <h3 className="ui-display text-xl text-ink">Police-ready incident draft</h3>
+                <p className="minimal-eyebrow mt-0.5">BNSS 2023, section 173 · not a police receipt</p>
               </div>
             </div>
 
-            {efirError && <p role="alert" className="rounded border border-danger/50 bg-danger/10 p-3 text-xs text-ink">{efirError}</p>}
+            {efirError && (
+              <div role="alert" className="nb-card-flat bg-danger/10 border-danger p-3 text-xs text-ink font-semibold">
+                {efirError}
+              </div>
+            )}
 
             {efirLoading ? (
               <div className="py-10 flex flex-col items-center justify-center text-ink-soft text-xs gap-2 font-mono">
@@ -637,8 +643,8 @@ export default function CitizenPage() {
                 <span>Saving your report draft for authorised review…</span>
               </div>
             ) : efirData ? (
-              <div className="space-y-2.5 text-xs bg-surface-2 p-4 rounded border-2 border-line">
-                <div className="flex justify-between border-b-2 border-line pb-2 font-mono">
+              <div className="space-y-3 text-xs minimal-card !p-4">
+                <div className="flex justify-between border-b border-line pb-2 font-mono">
                   <span className="text-ink-soft">PRAHARI REPORT DRAFT:</span>
                   <span className="font-bold text-ink">{efirData.efirId}</span>
                 </div>
@@ -652,7 +658,7 @@ export default function CitizenPage() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-ink-soft">Incident Category:</span>
-                  <span className="font-bold text-[#FF7722]">{efirData.incidentType}</span>
+                  <span className="font-bold text-amber-600">{efirData.incidentType}</span>
                 </div>
                 <div className="flex justify-between font-mono">
                   <span className="text-ink-soft">GPS Coordinates:</span>
@@ -662,66 +668,67 @@ export default function CitizenPage() {
                   <span className="text-ink-soft">Visual Attire Record:</span>
                   <span className="text-ink">{efirData.clothingProfile}</span>
                 </div>
-                <div className="flex justify-between border-t-2 border-line pt-2 text-success font-bold font-mono">
+                <div className="flex justify-between border-t border-line pt-2 text-emerald-700 font-bold font-mono">
                   <span>AUTHORISED REVIEW:</span>
                   <span>{efirData.policeVerification}</span>
                 </div>
-                <p className="border-t-2 border-line pt-2 text-ink-soft leading-relaxed">
+                <p className="border-t border-line pt-2 text-ink-soft leading-relaxed">
                   Police filing status: <strong className="text-ink">{efirData.policeFilingStatus ?? 'NOT_FILED_WITH_POLICE'}</strong>. Use the relevant State/UT police process to lodge a complaint; electronic information must meet the required signature process before it is taken on record.
                 </p>
-                <p className="border-t-2 border-line pt-2 text-ink-soft leading-relaxed">
+                <p className="border-t border-line pt-2 text-ink-soft leading-relaxed">
                   {efirData.narrative}
                 </p>
                 <div className="text-[11px] text-ink-soft">Saved {new Date(efirData.createdAt).toLocaleString()} · any integrity anchor belongs to this Prahari draft and is not a police acknowledgement.</div>
               </div>
             ) : (
               <form
-                className="space-y-3 text-xs"
+                className="space-y-4 text-xs"
                 onSubmit={(event) => { event.preventDefault(); handleGenerateEfir(); }}
               >
-                <p className="rounded border border-warning/40 bg-warning/10 p-2 text-ink-soft leading-relaxed">
+                <div className="nb-card-flat bg-amber-500/10 border-amber-500/30 p-3 text-xs leading-relaxed text-amber-900">
                   Include facts you personally know. Do not include passwords, bank PINs, or unnecessary identity numbers. This saves a Prahari draft for authorised review; it does not lodge an FIR with police.
-                </p>
+                </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <label className="space-y-1"><span className="font-bold">Incident category</span>
-                    <select value={efirForm.category} onChange={(e) => setEfirForm({ ...efirForm, category: e.target.value })} className="w-full rounded border-2 border-line bg-surface-2 p-2">
+                  <label className="space-y-1.5"><span className="font-bold text-ink">Incident category</span>
+                    <select value={efirForm.category} onChange={(e) => setEfirForm({ ...efirForm, category: e.target.value })} className="nb-input text-xs">
                       <option>Emergency / personal safety</option><option>Theft or lost property</option><option>Harassment or assault</option><option>Missing person concern</option><option>Other</option>
                     </select>
                   </label>
-                  <label className="space-y-1"><span className="font-bold">When did it happen?</span>
-                    <input type="datetime-local" value={efirForm.occurrenceAt} onChange={(e) => setEfirForm({ ...efirForm, occurrenceAt: e.target.value })} className="w-full rounded border-2 border-line bg-surface-2 p-2" />
+                  <label className="space-y-1.5"><span className="font-bold text-ink">When did it happen?</span>
+                    <input type="datetime-local" value={efirForm.occurrenceAt} onChange={(e) => setEfirForm({ ...efirForm, occurrenceAt: e.target.value })} className="nb-input text-xs" />
                   </label>
                 </div>
-                <label className="block space-y-1"><span className="font-bold">What happened? <span className="text-danger">*</span></span>
-                  <textarea required minLength={20} rows={4} value={efirForm.narrative} onChange={(e) => setEfirForm({ ...efirForm, narrative: e.target.value })} placeholder="Describe events in order: who, what, when, and what help is needed." className="w-full rounded border-2 border-line bg-surface-2 p-2" />
+                <label className="block space-y-1.5"><span className="font-bold text-ink">What happened? <span className="text-rose-600">*</span></span>
+                  <textarea required minLength={20} rows={4} value={efirForm.narrative} onChange={(e) => setEfirForm({ ...efirForm, narrative: e.target.value })} placeholder="Describe events in order: who, what, when, and what help is needed." className="nb-input text-xs" />
                 </label>
-                <label className="block space-y-1"><span className="font-bold">Suspect / person description (if relevant)</span>
-                  <input value={efirForm.suspectDescription} onChange={(e) => setEfirForm({ ...efirForm, suspectDescription: e.target.value })} placeholder="Appearance, vehicle, direction of travel" className="w-full rounded border-2 border-line bg-surface-2 p-2" />
+                <label className="block space-y-1.5"><span className="font-bold text-ink">Suspect / person description (if relevant)</span>
+                  <input value={efirForm.suspectDescription} onChange={(e) => setEfirForm({ ...efirForm, suspectDescription: e.target.value })} placeholder="Appearance, vehicle, direction of travel" className="nb-input text-xs" />
                 </label>
                 <div className="grid grid-cols-2 gap-3">
-                  <label className="space-y-1"><span className="font-bold">Witness name</span><input value={efirForm.witnessName} onChange={(e) => setEfirForm({ ...efirForm, witnessName: e.target.value })} className="w-full rounded border-2 border-line bg-surface-2 p-2" /></label>
-                  <label className="space-y-1"><span className="font-bold">Witness contact</span><input value={efirForm.witnessContact} onChange={(e) => setEfirForm({ ...efirForm, witnessContact: e.target.value })} className="w-full rounded border-2 border-line bg-surface-2 p-2" /></label>
+                  <label className="space-y-1.5"><span className="font-bold text-ink">Witness name</span><input value={efirForm.witnessName} onChange={(e) => setEfirForm({ ...efirForm, witnessName: e.target.value })} className="nb-input text-xs" /></label>
+                  <label className="space-y-1.5"><span className="font-bold text-ink">Witness contact</span><input value={efirForm.witnessContact} onChange={(e) => setEfirForm({ ...efirForm, witnessContact: e.target.value })} className="nb-input text-xs" /></label>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <label className="space-y-1"><span className="font-bold">Injuries / medical need</span><input value={efirForm.injuries} onChange={(e) => setEfirForm({ ...efirForm, injuries: e.target.value })} className="w-full rounded border-2 border-line bg-surface-2 p-2" /></label>
-                  <label className="space-y-1"><span className="font-bold">Callback number</span><input type="tel" value={efirForm.callbackNumber} onChange={(e) => setEfirForm({ ...efirForm, callbackNumber: e.target.value })} className="w-full rounded border-2 border-line bg-surface-2 p-2" /></label>
+                  <label className="space-y-1.5"><span className="font-bold text-ink">Injuries / medical need</span><input value={efirForm.injuries} onChange={(e) => setEfirForm({ ...efirForm, injuries: e.target.value })} className="nb-input text-xs" /></label>
+                  <label className="space-y-1.5"><span className="font-bold text-ink">Callback number</span><input type="tel" value={efirForm.callbackNumber} onChange={(e) => setEfirForm({ ...efirForm, callbackNumber: e.target.value })} className="nb-input text-xs" /></label>
                 </div>
-                <label className="block space-y-1"><span className="font-bold">Property / items (one per line)</span><textarea rows={2} value={efirForm.stolenItems} onChange={(e) => setEfirForm({ ...efirForm, stolenItems: e.target.value })} className="w-full rounded border-2 border-line bg-surface-2 p-2" /></label>
-                <label className="block space-y-1"><span className="font-bold">Evidence reference</span><input value={efirForm.evidenceReference} onChange={(e) => setEfirForm({ ...efirForm, evidenceReference: e.target.value })} placeholder="Photo ID, CCTV request, document reference (no uploads yet)" className="w-full rounded border-2 border-line bg-surface-2 p-2" /></label>
-                <label className="flex gap-2 items-start text-ink-soft"><input required type="checkbox" checked={efirForm.declarationAccepted} onChange={(e) => setEfirForm({ ...efirForm, declarationAccepted: e.target.checked })} className="mt-0.5" /><span>I confirm these facts are true to the best of my knowledge and understand this is not an FIR filing or police acknowledgement.</span></label>
-                <button type="submit" className="w-full py-2.5 bg-accent hover:bg-accent-strong text-white font-bold text-xs rounded transition cursor-pointer font-mono">SAVE DRAFT FOR AUTHORISED REVIEW</button>
+                <label className="block space-y-1.5"><span className="font-bold text-ink">Property / items (one per line)</span><textarea rows={2} value={efirForm.stolenItems} onChange={(e) => setEfirForm({ ...efirForm, stolenItems: e.target.value })} className="nb-input text-xs" /></label>
+                <label className="block space-y-1.5"><span className="font-bold text-ink">Evidence reference</span><input value={efirForm.evidenceReference} onChange={(e) => setEfirForm({ ...efirForm, evidenceReference: e.target.value })} placeholder="Photo ID, CCTV request, document reference (no uploads yet)" className="nb-input text-xs" /></label>
+                <label className="flex gap-2 items-start text-xs text-ink-soft"><input required type="checkbox" checked={efirForm.declarationAccepted} onChange={(e) => setEfirForm({ ...efirForm, declarationAccepted: e.target.checked })} className="mt-0.5 rounded border-line" /><span>I confirm these facts are true to the best of my knowledge and understand this is not an FIR filing or police acknowledgement.</span></label>
+                <button type="submit" className="minimal-button minimal-button-primary w-full !py-3 text-xs font-semibold">SAVE DRAFT FOR AUTHORISED REVIEW</button>
               </form>
             )}
 
             {efirData && <button
               onClick={() => setActiveModal('none')}
-              className="w-full py-2.5 bg-accent hover:bg-accent-strong text-white font-bold text-xs rounded transition cursor-pointer font-mono"
+              className="minimal-button minimal-button-secondary w-full"
             >
               CLOSE DRAFT
             </button>}
           </div>
         </div>
-      )}
+      </div>
+    )}
 
       {activeModal === 'attire' && (
         <EmergencyIdentificationProfile

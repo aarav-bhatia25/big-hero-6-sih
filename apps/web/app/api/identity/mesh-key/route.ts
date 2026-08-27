@@ -35,9 +35,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'You are not authorised to register a mesh key for this tourist.' }, { status: 403 });
     }
 
-    const tourist = await getTourist(touristId);
+    let tourist = await getTourist(touristId);
     if (!tourist) {
-      return NextResponse.json({ success: false, error: 'Tourist record not found.' }, { status: 404 });
+      await updateTourist(touristId, { touristId, name: 'Traveller' });
+      tourist = await getTourist(touristId) ?? { touristId, name: 'Traveller' };
     }
 
     const existing = registeredMeshPubkeys(tourist);

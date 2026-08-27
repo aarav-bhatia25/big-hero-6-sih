@@ -47,7 +47,7 @@ export default function IncidentQueue({ incidents, selectedIncidentId, onSelectI
           {incidents.map((incident) => {
             const selected = selectedIncidentId === incident.incidentId;
             const critical = String(incident.severity ?? '').toLowerCase() === 'critical';
-            const isBleRelay = incident.transportType === 'BLE_RELAY';
+            const isBleRelay = ['BLE_RELAY', 'PEER_MESH', 'LOCAL_QUEUE', 'BLUETOOTH'].includes(incident.transportType ?? '');
             return (
               <button
                 type="button"
@@ -62,7 +62,7 @@ export default function IncidentQueue({ incidents, selectedIncidentId, onSelectI
                       <span className="truncate font-mono text-sm font-semibold text-ink">{incident.incidentId}</span>
                       {isBleRelay && (
                         <span className="rounded-full border border-stone-300 bg-stone-100 px-2 py-0.5 font-mono text-[10px] font-bold text-stone-700">
-                          BLE GATEWAY RELAY
+                          BLUETOOTH MESH
                         </span>
                       )}
                     </div>
@@ -74,7 +74,7 @@ export default function IncidentQueue({ incidents, selectedIncidentId, onSelectI
                   <span>{incident.assignedResponderUnitId ? `Assigned: ${incident.assignedResponderUnitId}` : 'Unassigned'}</span>
                   {incident.etaMinutes != null && <span>ETA {incident.etaMinutes} min</span>}
                   {incident.riskScore != null && <span>Risk {incident.riskScore}/100</span>}
-                  {incident.transportType && <span>Via: {incident.transportType}</span>}
+                  {incident.transportType && <span>Via: {isBleRelay ? 'BLUETOOTH MESH' : incident.transportType}</span>}
                 </div>
               </button>
             );

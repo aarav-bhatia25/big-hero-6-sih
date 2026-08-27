@@ -81,9 +81,9 @@ export async function POST(request: NextRequest) {
     // The packet schema does not constrain this field, so a queued packet from
     // an older client can arrive without it. Never write an unrecognised value
     // into the incident's transport provenance or its timeline wording.
-    const relayedTransport = gatewayAuthenticated
+    const relayedTransport = meshRelayed || gatewayAuthenticated
       ? 'BLE_RELAY'
-      : (['INTERNET', 'PEER_MESH', 'BLE_RELAY', 'SMS', 'LOCAL_QUEUE'] as const).find((known) => known === effectivePacket.lastKnownTransport) ?? 'LOCAL_QUEUE';
+      : (['INTERNET', 'PEER_MESH', 'BLE_RELAY', 'SMS', 'LOCAL_QUEUE'] as const).find((known) => known === effectivePacket.lastKnownTransport) ?? 'BLE_RELAY';
 
     const existing = (await listIncidents(200)).find((incident: any) => incident.incidentId === incidentId);
     if (existing) {

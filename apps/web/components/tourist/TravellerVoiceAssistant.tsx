@@ -205,8 +205,9 @@ export default function TravellerVoiceAssistant({ touristId, coords, preferredLa
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-surface-2/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="voice-assistant-title">
-      <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-nb border-2 border-line bg-surface p-5 text-ink shadow-nb sm:p-6">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-stone-950/40 p-4 sm:p-6 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="voice-assistant-title">
+      <div className="flex min-h-full items-center justify-center py-6 sm:py-10">
+        <div className="relative w-full max-w-2xl rounded-2xl border border-line bg-surface p-5 sm:p-7 text-ink shadow-2xl space-y-5 my-auto">
         <div className="flex items-start justify-between gap-4 border-b-2 border-line pb-4">
           <div className="flex gap-3"><div className="rounded-lg bg-red-500/15 p-3 text-red-500"><Mic className="size-6" /></div><div><h2 id="voice-assistant-title" className="text-lg font-semibold">Voice emergency assistance</h2><p className="mt-1 text-sm leading-5 text-ink-soft">Speak an SOS or factual report in your language. Always check the written text before you send it.</p></div></div>
           <button onClick={onClose} className="minimal-button minimal-button-secondary shrink-0 px-3 py-2 text-xs">Close</button>
@@ -242,5 +243,6 @@ export default function TravellerVoiceAssistant({ touristId, coords, preferredLa
         </section>}
       </div>
     </div>
-  );
+  </div>
+);
 }

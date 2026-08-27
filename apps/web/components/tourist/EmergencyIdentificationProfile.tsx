@@ -69,11 +69,12 @@ export default function EmergencyIdentificationProfile({ touristId, profile, onS
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-surface-2/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="emergency-profile-title">
-      <div className="relative max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-nb border-2 border-line bg-surface p-6 text-ink shadow-nb">
-        <button onClick={onClose} className="absolute right-4 top-4 rounded border-2 border-line bg-surface-2 p-1 text-ink-soft hover:text-ink" aria-label="Close emergency identification profile">
-          <X className="size-5" />
-        </button>
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-stone-950/40 p-4 sm:p-6 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="emergency-profile-title">
+      <div className="flex min-h-full items-center justify-center py-6 sm:py-10">
+        <div className="relative w-full max-w-xl rounded-2xl border border-line bg-surface p-5 sm:p-7 text-ink shadow-2xl space-y-5 my-auto">
+          <button onClick={onClose} className="minimal-button minimal-button-secondary absolute right-4 top-4 !p-2 !min-h-0 cursor-pointer" aria-label="Close emergency identification profile">
+            <X className="size-4" />
+          </button>
         <div className="flex items-start gap-3 border-b-2 border-line pb-4 pr-8">
           <div className="rounded-lg bg-sky-400/10 p-3 text-sky-400"><Shirt className="size-6" /></div>
           <div>
@@ -129,5 +130,6 @@ export default function EmergencyIdentificationProfile({ touristId, profile, onS
         )}
       </div>
     </div>
-  );
+  </div>
+);
 }

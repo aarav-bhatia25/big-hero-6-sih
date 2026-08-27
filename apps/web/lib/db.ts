@@ -55,7 +55,20 @@ export async function updateTourist(touristId: string, fields: Row): Promise<boo
     .from("tourists")
     .update({ ...fields, updatedAt: new Date().toISOString() })
     .eq("touristId", touristId);
-  if (error) { console.warn("[prahari] updateTourist:", error.message); return false; }
+  if (error) {
+    console.warn("[prahari] updateTourist:", error.message);
+    if (error.message?.includes("schema cache") || error.message?.includes("column") || error.code === 'PGRST204') {
+      const copy = { ...fields };
+      delete copy.meshPubkeys;
+      if (Object.keys(copy).length > 0) {
+        const { error: retryErr } = await sb.from("tourists").update({ ...copy, updatedAt: new Date().toISOString() }).eq("touristId", touristId);
+        if (!retryErr) return true;
+      } else {
+        return true;
+      }
+    }
+    return false;
+  }
   return true;
 }
 

@@ -45,9 +45,7 @@ export default function AuthorityEmergencyChat({ incidentId, touristName = 'Trav
     };
   }, [incidentId]);
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+
 
   const handleSendResponse = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -161,8 +159,8 @@ export default function AuthorityEmergencyChat({ incidentId, touristName = 'Trav
                 <div
                   className={`max-w-[85%] rounded-lg px-3 py-2 text-xs leading-relaxed ${
                     isAuthority
-                      ? 'bg-emerald-700 text-white rounded-br-none font-medium'
-                      : 'bg-surface border border-sky-500/40 text-sky-200 rounded-bl-none'
+                      ? 'bg-stone-900 text-white rounded-br-none font-medium shadow-sm'
+                      : 'bg-sky-50 border border-sky-200 text-sky-950 rounded-bl-none font-medium shadow-sm'
                   }`}
                 >
                   {isAuthority && msg.originalText ? msg.originalText : msg.chatText}
@@ -171,16 +169,16 @@ export default function AuthorityEmergencyChat({ incidentId, touristName = 'Trav
                   <p className="mt-1 max-w-[85%] text-[10px] leading-4 text-ink-soft">Delivered in {languageLabel(msg.chatLanguage)}: {msg.chatText}</p>
                 )}
                 {!isAuthority && translations[msg.packetId] && (
-                  <p className="mt-1 max-w-[85%] rounded bg-sky-500/10 px-2 py-1 text-[10px] leading-4 text-sky-200">English: {translations[msg.packetId]}</p>
+                  <p className="mt-1 max-w-[85%] rounded bg-sky-100 border border-sky-200 px-2 py-1 text-[10px] leading-4 text-sky-900 font-medium">English: {translations[msg.packetId]}</p>
                 )}
                 {!isAuthority && msg.chatText && !translations[msg.packetId] && (
                   <button type="button" onClick={() => void translateIncoming(msg)} disabled={translatingPacketId === msg.packetId}
-                    className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold text-sky-300 underline disabled:opacity-50">
+                    className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold text-sky-700 hover:text-sky-900 underline disabled:opacity-50">
                     {translatingPacketId === msg.packetId ? <Loader2 className="size-3 animate-spin" /> : <Languages className="size-3" />} Translate to English
                   </button>
                 )}
-                <div className="mt-0.5 flex items-center gap-1 text-[9px] text-emerald-400/80 font-mono">
-                  <CheckCircle2 className="size-2.5" />
+                <div className="mt-0.5 flex items-center gap-1 text-[9px] text-emerald-700 font-mono">
+                  <CheckCircle2 className="size-2.5 text-emerald-600" />
                   <span>{msg.lastKnownTransport === 'INTERNET' ? 'Saved to command record' : 'Pending delivery'}</span>
                 </div>
               </div>

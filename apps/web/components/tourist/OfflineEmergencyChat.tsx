@@ -91,10 +91,7 @@ export default function OfflineEmergencyChat({
     };
   }, [incidentId]);
 
-  // Scroll to bottom
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -167,8 +164,8 @@ export default function OfflineEmergencyChat({
                 <div
                   className={`max-w-[85%] rounded-lg px-3 py-2 text-xs leading-relaxed ${
                     isTourist
-                      ? 'bg-sky-600 text-white rounded-br-none'
-                      : 'bg-surface-2 border border-emerald-500/40 text-emerald-200 rounded-bl-none font-medium'
+                      ? 'bg-sky-700 text-white rounded-br-none font-medium shadow-sm'
+                      : 'bg-emerald-50 border border-emerald-200 text-emerald-950 rounded-bl-none font-medium shadow-sm'
                   }`}
                 >
                   {msg.chatText}
@@ -176,8 +173,8 @@ export default function OfflineEmergencyChat({
                 {msg.senderRole === 'authority' && msg.originalText && (
                   <p className="mt-1 max-w-[85%] text-[10px] leading-4 text-ink-soft">Official original ({languageLabel(msg.originalLanguage)}): {msg.originalText}</p>
                 )}
-                <div className="mt-0.5 flex items-center gap-1 text-[9px] text-sky-300/70 font-mono">
-                  <CheckCircle2 className="size-2.5 text-emerald-400" />
+                <div className="mt-0.5 flex items-center gap-1 text-[9px] text-emerald-700 font-mono">
+                  <CheckCircle2 className="size-2.5 text-emerald-600" />
                   <span>{msg.lastKnownTransport === 'INTERNET' ? 'Sent to authority queue' : 'Stored locally — pending delivery'}</span>
                 </div>
               </div>
