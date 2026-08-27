@@ -38,17 +38,37 @@ const getResponderIcon = () =>
     : (null as any);
 
 const getOfflinePlaceIcon = (category: string) => {
-  const labels: Record<string, string> = { tourist: '★', hospital: '+', police: 'P', fire_station: 'F', safety_zone: '!' };
-  const colors: Record<string, string> = { tourist: '#7c3aed', hospital: '#dc2626', police: '#2563eb', fire_station: '#ea580c', safety_zone: '#059669' };
+  const config: Record<string, { label: string; bg: string; border: string; shadow: string }> = {
+    hospital: { label: '🏥', bg: '#dc2626', border: '#ffffff', shadow: 'rgba(220, 38, 38, 0.6)' },
+    police: { label: '🚓', bg: '#2563eb', border: '#ffffff', shadow: 'rgba(37, 99, 235, 0.6)' },
+    fire_station: { label: '🚒', bg: '#ea580c', border: '#ffffff', shadow: 'rgba(234, 88, 12, 0.6)' },
+    safety_zone: { label: '🛡️', bg: '#059669', border: '#ffffff', shadow: 'rgba(5, 150, 105, 0.6)' },
+    tourist: { label: '★', bg: '#7c3aed', border: '#ffffff', shadow: 'rgba(124, 58, 237, 0.6)' },
+  };
+
+  const item = config[category] || { label: '•', bg: '#475569', border: '#ffffff', shadow: 'rgba(71, 85, 105, 0.6)' };
+
   return typeof window !== 'undefined'
     ? new L.DivIcon({
         className: 'custom-leaflet-icon',
-        html: `<div style="background-color:${colors[category] || '#475569'};width:24px;height:24px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:800">${labels[category] || '•'}</div>`,
-        iconSize: [24, 24],
-        iconAnchor: [12, 12],
+        html: `<div style="background-color:${item.bg};width:28px;height:28px;border-radius:50%;border:2px solid ${item.border};box-shadow:0 0 10px ${item.shadow}, 0 2px 6px rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px;font-weight:800;cursor:pointer;">${item.label}</div>`,
+        iconSize: [28, 28],
+        iconAnchor: [14, 14],
       })
     : (null as any);
 };
+
+export interface NearbyPlaceItem {
+  id: string;
+  name: string;
+  category: 'tourist' | 'hospital' | 'police' | 'fire_station' | 'safety_zone';
+  lat: number;
+  lng: number;
+  address?: string;
+  phone?: string;
+  distanceKm?: number;
+  status?: string;
+}
 
 interface ClientMapInnerProps {
   touristPos?: { lat: number; lng: number } | null;
@@ -75,6 +95,7 @@ interface ClientMapInnerProps {
     lng: number;
     type: string;
   }>;
+  nearbyPlaces?: NearbyPlaceItem[];
 }
 
 function FitToData({ points }: { points: Array<[number, number]> }) {
@@ -116,6 +137,7 @@ export default function ClientMapInner({
   geofences = [],
   incidents = [],
   responders = [],
+  nearbyPlaces = [],
 }: ClientMapInnerProps) {
   const [showHeatmap, setShowHeatmap] = useState(true);
   const [offlinePack, setOfflinePack] = useState<OfflineMapPack | null>(null);
@@ -134,6 +156,21 @@ export default function ClientMapInner({
 
   const activeGeofences = geofences;
 
+  const allPlaces = useMemo(() => {
+    const placeMap = new Map<string, NearbyPlaceItem>();
+    if (offlinePack?.places) {
+      for (const p of offlinePack.places) {
+        placeMap.set(p.id, p);
+      }
+    }
+    if (nearbyPlaces) {
+      for (const p of nearbyPlaces) {
+        placeMap.set(p.id, p);
+      }
+    }
+    return Array.from(placeMap.values());
+  }, [offlinePack, nearbyPlaces]);
+
   const points: Array<[number, number]> = useMemo(() => [
     ...(touristPos ? [[touristPos.lat, touristPos.lng] as [number, number]] : []),
     ...liveTourists
@@ -145,11 +182,11 @@ export default function ClientMapInner({
     ...responders
       .filter((r) => typeof r.lat === 'number' && typeof r.lng === 'number')
       .map((r) => [r.lat, r.lng] as [number, number]),
-    ...(offlinePack?.places
+    ...allPlaces
       .filter((place) => typeof place.lat === 'number' && typeof place.lng === 'number')
-      .map((place) => [place.lat, place.lng] as [number, number]) ?? []),
+      .map((place) => [place.lat, place.lng] as [number, number]),
     ...activeGeofences.flatMap((g) => normalizePolygonCoords(g)),
-  ], [touristPos, liveTourists, incidents, responders, offlinePack, activeGeofences]);
+  ], [touristPos, liveTourists, incidents, responders, allPlaces, activeGeofences]);
 
   const riskHotspots = useMemo(() => {
     const severityStyle = (severity: string) => {
@@ -329,38 +366,71 @@ export default function ClientMapInner({
           </Marker>
         ))}
 
-        {/* Places stored by the traveller's selected offline safety pack. */}
-        {offlinePack?.places.map((place) => (
-          <Marker key={`offline-${place.id}`} position={[place.lat, place.lng]} icon={getOfflinePlaceIcon(place.category)}>
-            <Popup>
-              <div className="p-1 font-sans text-slate-900">
-                <strong className="block text-sm font-bold">{place.name}</strong>
-                <span className="block text-xs font-semibold capitalize">{place.category.replace('_', ' ')}</span>
-                {place.address && <span className="mt-1 block text-xs text-slate-600">{place.address}</span>}
-                {place.phone && <a href={`tel:${place.phone}`} className="mt-1 block text-xs font-semibold text-blue-700 underline">Call {place.phone}</a>}
-              </div>
-            </Popup>
-          </Marker>
-        ))}
+        {/* Emergency Places: Hospitals, Police, Fire, Safe Zones */}
+        {allPlaces.map((place) => {
+          const categoryColors: Record<string, string> = {
+            hospital: '#dc2626',
+            police: '#2563eb',
+            fire_station: '#ea580c',
+            safety_zone: '#059669',
+            tourist: '#7c3aed',
+          };
+          const badgeColor = categoryColors[place.category] || '#475569';
+          const categoryLabel = place.category === 'fire_station' ? 'Fire Station' : place.category.replace('_', ' ');
+
+          return (
+            <Marker key={`place-${place.id}`} position={[place.lat, place.lng]} icon={getOfflinePlaceIcon(place.category)}>
+              <Popup>
+                <div className="p-2 font-sans text-slate-900 max-w-[240px]">
+                  <div className="flex items-center justify-between gap-1 mb-1.5">
+                    <span className="px-2 py-0.5 rounded text-[10px] font-extrabold uppercase text-white tracking-wide" style={{ backgroundColor: badgeColor }}>
+                      {categoryLabel}
+                    </span>
+                    {place.distanceKm !== undefined && (
+                      <span className="text-[11px] font-bold text-slate-500">{place.distanceKm.toFixed(1)} km away</span>
+                    )}
+                  </div>
+                  <strong className="block text-sm font-bold text-slate-900 leading-tight">{place.name}</strong>
+                  {place.address && <p className="mt-1 text-xs text-slate-600 leading-snug">{place.address}</p>}
+                  {place.status && (
+                    <p className="mt-1.5 text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 inline-block">
+                      {place.status}
+                    </p>
+                  )}
+                  {place.phone && (
+                    <div className="mt-2.5 pt-2 border-t border-slate-200 flex items-center justify-between">
+                      <a href={`tel:${place.phone}`} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-semibold hover:bg-slate-800 transition shadow-sm">
+                        📞 Call {place.phone}
+                      </a>
+                      <span className="text-[10px] text-slate-400 font-mono">Verified Node</span>
+                    </div>
+                  )}
+                </div>
+              </Popup>
+            </Marker>
+          );
+        })}
       </MapContainer>
 
-      <div className="absolute bottom-3 left-3 z-[1000] flex flex-wrap items-center gap-3 rounded-lg border border-slate-700/80 bg-slate-900/90 px-3 py-2 text-xs text-slate-200 backdrop-blur-md">
-        {(touristPos || liveTourists.length > 0) && <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-emerald-500" />Traveller</span>}
-        {incidents.length > 0 && <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-red-500" />Incident</span>}
-        {activeGeofences.length > 0 && <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-amber-500" />Geofence</span>}
-        {responders.length > 0 && <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-blue-500" />Responder</span>}
-        {offlinePack && <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-violet-500" />Offline pack · {offlinePack.places.length} places</span>}
+      <div className="absolute bottom-3 left-3 z-[1000] flex flex-wrap items-center gap-2 rounded-lg border border-slate-700/80 bg-slate-900/90 px-3 py-2 text-xs text-slate-200 backdrop-blur-md">
+        {(touristPos || liveTourists.length > 0) && <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981]" />Your Location</span>}
+        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-red-600" />Hospitals ({allPlaces.filter(p => p.category === 'hospital').length})</span>
+        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-blue-600" />Police ({allPlaces.filter(p => p.category === 'police').length})</span>
+        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-orange-500" />Fire ({allPlaces.filter(p => p.category === 'fire_station').length})</span>
+        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-emerald-600" />Safe Zones ({allPlaces.filter(p => p.category === 'safety_zone').length})</span>
+        {incidents.length > 0 && <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-red-500 animate-ping" />Incident</span>}
+        {activeGeofences.length > 0 && <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-amber-500" />Geofence</span>}
         <button
           type="button"
           onClick={() => setShowHeatmap((prev) => !prev)}
-          className={`flex items-center gap-1.5 rounded px-2.5 py-1 text-[11px] font-semibold transition ${
+          className={`ml-auto flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-semibold transition ${
             showHeatmap
               ? 'bg-purple-500/30 text-purple-300 border border-purple-400/40'
               : 'bg-slate-800 text-slate-400 border border-slate-700'
           }`}
         >
           <span className="h-2 w-2 rounded-full bg-purple-400" />
-          Risk overlay: {showHeatmap ? 'ON' : 'OFF'}
+          Risk Overlay: {showHeatmap ? 'ON' : 'OFF'}
         </button>
       </div>
     </div>

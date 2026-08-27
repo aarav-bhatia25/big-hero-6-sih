@@ -4,6 +4,8 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { ArrowUpRight, ArrowRight } from 'lucide-react';
 
+import HeaderNav from '@/components/HeaderNav';
+
 /* Photographic props framing the page corners — traveller kit down the left,
    authority kit down the right. Decorative only; the centre column stays clear.
    Sizes are tuned per-asset because these are tight cutouts with almost no
@@ -26,15 +28,7 @@ export default function Home() {
         ))}
       </div>
 
-      <nav className="landing-nav">
-        <Link href="/" className="landing-brand">Prahari</Link>
-        <div className="landing-nav-links">
-          <a href="#top">Home</a>
-          <a href="#roles">Who it&apos;s for</a>
-          <Link href="/login">Sign in</Link>
-        </div>
-        <a href="#roles" className="landing-nav-cta">Get started <ArrowUpRight size={15} /></a>
-      </nav>
+      <HeaderNav />
 
       <main id="top" className="landing-main">
         <section className="landing-hero">
@@ -85,11 +79,6 @@ export default function Home() {
           </article>
         </section>
       </main>
-
-      <footer className="landing-footer">
-        <span>© 2026 Prahari</span>
-        <a href="tel:112">Emergency: 112</a>
-      </footer>
     </div>
   );
 }

@@ -3,6 +3,18 @@
 import React, { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 
+export interface NearbyPlace {
+  id: string;
+  name: string;
+  category: 'tourist' | 'hospital' | 'police' | 'fire_station' | 'safety_zone';
+  lat: number;
+  lng: number;
+  address?: string;
+  phone?: string;
+  distanceKm?: number;
+  status?: string;
+}
+
 interface MapViewProps {
   touristPos?: { lat: number; lng: number } | null;
   liveTourists?: Array<{ touristId: string; lat: number; lng: number; timestamp?: string }>;
@@ -28,6 +40,7 @@ interface MapViewProps {
     lng: number;
     type: string;
   }>;
+  nearbyPlaces?: NearbyPlace[];
   interactive?: boolean;
 }
 

@@ -42,22 +42,22 @@ export default function AIIncidentBrief({ incidentId }: { incidentId: string }) 
   };
 
   return (
-    <section className="rounded-nb border border-violet-400/30 bg-violet-400/10 p-4" aria-label="AI-assisted incident brief">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex items-start gap-3">
-          <div className="grid size-9 shrink-0 place-items-center rounded-full bg-violet-600 text-white"><Bot size={18} /></div>
+    <div className="pt-4 mt-4 border-t border-line space-y-3" aria-label="AI-assisted incident brief">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Bot className="size-4 shrink-0 text-indigo-600" />
           <div>
-            <p className="font-semibold text-ink">AI-assisted incident brief</p>
-            <p className="mt-1 text-xs leading-5 text-ink-soft">Sarvam AI condenses the authorised incident record into a review aid. It never dispatches responders or makes a finding.</p>
+            <h4 className="font-semibold text-ink text-xs">AI-assisted incident brief</h4>
+            <p className="text-[11px] leading-relaxed text-ink-soft">Sarvam AI condensed case summary aid for review.</p>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <select value={briefLanguage} onChange={(event) => setBriefLanguage(event.target.value)} className="rounded border border-violet-400/40 bg-surface px-2 py-1.5 text-xs text-ink">
+          <select value={briefLanguage} onChange={(event) => setBriefLanguage(event.target.value)} className="rounded border border-line bg-surface px-2 py-1 text-[11px] text-ink">
             {COMMUNICATION_LANGUAGES.map((language) => <option key={language.code} value={language.code}>{language.label}</option>)}
           </select>
-          <button onClick={generate} disabled={loading} className="minimal-button border border-violet-400/50 bg-violet-600/20 text-violet-100 hover:bg-violet-600/30 disabled:opacity-60">
-            {loading ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
-            {loading ? 'Preparing brief…' : brief ? 'Refresh brief' : 'Generate brief'}
+          <button onClick={generate} disabled={loading} className="minimal-button minimal-button-primary text-xs px-2.5 py-1 shrink-0 disabled:opacity-60">
+            {loading ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+            {loading ? 'Preparing…' : brief ? 'Refresh brief' : 'Generate brief'}
           </button>
         </div>
       </div>
@@ -72,7 +72,7 @@ export default function AIIncidentBrief({ incidentId }: { incidentId: string }) 
           </div>
         </div>
       )}
-    </section>
+    </div>
   );
 }
 

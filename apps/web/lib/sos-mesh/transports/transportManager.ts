@@ -30,11 +30,8 @@ const loadOptionalBleTransport: TransportLoader = async () => {
 };
 
 const loadOptionalPeerMeshTransport: TransportLoader = async () => {
-  // Checked before the import so a server or an unsupported browser never pays
-  // to load WebRTC code it cannot use.
-  if (typeof RTCPeerConnection === 'undefined') return null;
-  const { globalWebRtcTransport } = await import('./webRtcTransport');
-  return globalWebRtcTransport;
+  const { globalBroadcastMeshTransport } = await import('./broadcastMeshTransport');
+  return globalBroadcastMeshTransport;
 };
 
 export class SOSTransportManager {
@@ -129,6 +126,15 @@ export class SOSTransportManager {
     const localResult = await this.tryTransport(this.localTransport, packet);
 
     const peerResult = await this.tryOfflineLink(allowPeerMesh, this.loadPeerMeshTransport, packet, 'TRY_PEER_MESH');
+
+    // Automatically emit near-ultrasonic sound beacon (18.5 - 19.5 kHz FSK) for zero-pairing microphone pick up
+    void (async () => {
+      try {
+        const { globalAcousticTransport } = await import('./acousticTransport');
+        await this.tryTransport(globalAcousticTransport, packet);
+      } catch {}
+    })();
+
     if (peerResult) {
       globalSOSStateMachine.transitionTo('RELAYED', {
         incidentId: packet.incidentId,

@@ -32,31 +32,34 @@ export default function MissingPersonDraftPanel({ incident, onSaved }: { inciden
   };
 
   return (
-    <section className="rounded-nb border border-amber-600/25 bg-amber-50 p-4" aria-label="Missing-person information draft">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex gap-3">
-          <FileWarning className="mt-0.5 size-5 shrink-0 text-amber-700" />
+    <div className="pt-4 mt-4 border-t border-line space-y-3" aria-label="Missing-person information draft">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <FileWarning className="size-4 shrink-0 text-amber-600" />
           <div>
-            <p className="font-semibold text-ink">Missing-person information draft</p>
-            <p className="mt-1 max-w-2xl text-xs leading-5 text-ink-soft">Uses the verified tourist profile, latest consented location, emergency contacts, identification profile, and reviewed SOS text. It generates factual content only.</p>
+            <h4 className="font-semibold text-ink text-xs">Missing-person information draft</h4>
+            <p className="text-[11px] leading-relaxed text-ink-soft">Uses verified profile, location, emergency contacts, and reviewed SOS text.</p>
           </div>
         </div>
-        <button onClick={generate} disabled={loading} className="minimal-button border border-amber-600/25 bg-white text-amber-900 hover:bg-amber-100 disabled:opacity-60">
-          {loading ? <Loader2 className="size-4 animate-spin" /> : <FileWarning className="size-4" />}
-          {draft ? 'Regenerate factual draft' : 'Generate draft'}
+        <button onClick={generate} disabled={loading} className="minimal-button minimal-button-secondary text-xs px-2.5 py-1 shrink-0 disabled:opacity-60">
+          {loading ? <Loader2 className="size-3 animate-spin" /> : <FileWarning className="size-3" />}
+          {draft ? 'Regenerate draft' : 'Generate draft'}
         </button>
       </div>
-      {error && <p role="alert" className="mt-3 text-xs leading-5 text-rose-700">{error}</p>}
+      {error && <p role="alert" className="text-xs text-rose-600">{error}</p>}
       {draft && (
-        <div className="mt-4 space-y-3 border-t border-amber-600/20 pt-4">
-          <div className="flex items-start gap-2 rounded border border-amber-600/20 bg-white/70 p-3 text-xs leading-5 text-ink-soft"><ShieldCheck className="mt-0.5 size-4 shrink-0 text-amber-700" />{draft.legalFramework?.filingStatus === 'NOT_FILED_WITH_POLICE' ? 'Not filed with police. An authorised officer must verify facts, use the relevant State/UT process, and obtain the informant’s signature when required before an electronic FIR can be taken on record.' : 'Review the legal filing status before taking further action.'}</div>
-          <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded border border-line bg-surface p-3 font-sans text-sm leading-6 text-ink">{draft.narrative}</pre>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-xs text-ink-soft">Generated {draft.generatedAt ? new Date(draft.generatedAt).toLocaleString() : 'now'} · Last location is an historic, consented record—not a live location.</p>
-            <button onClick={() => void copyDraft()} className="minimal-button minimal-button-secondary px-3 py-2 text-xs"><Clipboard className="size-3.5" />{copied ? 'Copied' : 'Copy factual draft'}</button>
+        <div className="space-y-3 pt-2">
+          <div className="flex items-start gap-2 rounded-lg border border-line bg-surface-2 p-2.5 text-xs text-ink-soft">
+            <ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-amber-600" />
+            <span>{draft.legalFramework?.filingStatus === 'NOT_FILED_WITH_POLICE' ? 'Not filed with police. Officer must verify facts and obtain signature before electronic FIR record.' : 'Review legal filing status before taking action.'}</span>
+          </div>
+          <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-lg border border-line bg-surface p-3 font-sans text-xs leading-relaxed text-ink">{draft.narrative}</pre>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-[11px] text-ink-soft">Generated {draft.generatedAt ? new Date(draft.generatedAt).toLocaleString() : 'now'}</p>
+            <button onClick={() => void copyDraft()} className="minimal-button minimal-button-secondary px-2.5 py-1 text-xs"><Clipboard className="size-3" />{copied ? 'Copied' : 'Copy draft text'}</button>
           </div>
         </div>
       )}
-    </section>
+    </div>
   );
 }

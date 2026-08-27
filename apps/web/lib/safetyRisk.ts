@@ -105,9 +105,9 @@ function previousCoordinates(ping: HistoricalPing): SafetyCoordinates | null {
 }
 
 function riskLevel(score: number): SafetyAssessment["level"] {
-  if (score >= 85) return "critical";
-  if (score >= 70) return "high";
-  if (score >= 40) return "medium";
+  if (score >= 75) return "critical";
+  if (score >= 50) return "high";
+  if (score >= 25) return "medium";
   return "low";
 }
 
@@ -120,7 +120,7 @@ export function assessSafetyRisk(input: AssessmentInput): SafetyAssessment {
   const now = input.now ?? new Date();
   const signals: SafetySignal[] = [];
   const zoneRisk = Math.max(0, Math.min(40, input.zoneRisk ?? 0));
-  const localIncidentCount = Math.max(0, Math.min(20, Math.floor(input.localIncidentCount ?? 0)));
+  const localIncidentCount = Math.max(0, Math.min(50, Math.floor(input.localIncidentCount ?? 0)));
   const environmentalRisk = Math.max(0, Math.min(30, Math.round(input.environmentalRisk ?? 0)));
   const localHour = Number.isInteger(input.localHour) ? Number(input.localHour) : Number(new Intl.DateTimeFormat('en-IN', { hour: 'numeric', hourCycle: 'h23', timeZone: 'Asia/Kolkata' }).format(now));
   const isNighttime = localHour >= 22 || localHour < 5;
@@ -136,10 +136,11 @@ export function assessSafetyRisk(input: AssessmentInput): SafetyAssessment {
   }
 
   if (localIncidentCount > 0) {
-    const contribution = Math.min(25, 5 + localIncidentCount * 4);
+    const contribution = Math.min(75, localIncidentCount * 4 + (localIncidentCount >= 5 ? 15 : 5));
+    const severity: SafetySignal["severity"] = contribution >= 60 ? 'critical' : contribution >= 40 ? 'high' : contribution >= 20 ? 'medium' : 'low';
     signals.push({
       code: 'local_incident_density',
-      severity: contribution >= 20 ? 'high' : contribution >= 12 ? 'medium' : 'low',
+      severity,
       message: `${localIncidentCount} recent operational incident${localIncidentCount === 1 ? '' : 's'} were recorded near this location.`,
       contribution,
     });

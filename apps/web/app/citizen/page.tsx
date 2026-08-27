@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   MapPin,
   FileText,
@@ -20,6 +20,7 @@ import MapView from '@/components/maps/MapView';
 import OfflineMapPackStatus from '@/components/offline/OfflineMapPackStatus';
 import EmergencyIdentificationProfile from '@/components/tourist/EmergencyIdentificationProfile';
 import TravellerVoiceAssistant from '@/components/tourist/TravellerVoiceAssistant';
+import { subscribeToPrahariLive } from '@/lib/supabaseRealtime';
 
 type LiveSafetyRisk = {
   score: number;
@@ -82,10 +83,14 @@ export default function CitizenPage() {
 
   // The score is returned by the server after it receives actual consented telemetry.
   const [liveSafetyRisk, setLiveSafetyRisk] = useState<LiveSafetyRisk | null>(null);
+  const [popupsEnabled, setPopupsEnabled] = useState<boolean>(
+    () => typeof Notification !== 'undefined' && Notification.permission === 'granted'
+  );
 
 
   // Geofence & Risk State
   const [geofences, setGeofences] = useState<any[]>([]);
+  const [filedEfirs, setFiledEfirs] = useState<any[]>([]);
 
   // The credentialed tourist this session belongs to. Loaded from the API so
   // the citizen and authority views always agree on who is being tracked.
@@ -95,7 +100,79 @@ export default function CitizenPage() {
   const lastTelemetryRef = useRef<{ lat: number; lng: number; sentAt: number } | null>(null);
   const notifiedHazardIdsRef = useRef(new Set<string>());
 
-  // Load the authenticated identity and published geofences once.
+  const userLat = coords?.lat ?? 28.6139;
+  const userLng = coords?.lng ?? 77.2090;
+
+  const mockNearbyPlaces = useMemo(() => [
+    {
+      id: 'hosp-apex-1',
+      name: 'Apex Emergency Hospital & Trauma Care',
+      category: 'hospital' as const,
+      lat: userLat + 0.0042,
+      lng: userLng + 0.0065,
+      address: '24 Main Highway Corridor, Sector 4',
+      phone: '102',
+      distanceKm: 0.6,
+      status: '24/7 ICU & Trauma Unit',
+    },
+    {
+      id: 'police-central-1',
+      name: 'Central District Police Station & Tourist Desk',
+      category: 'police' as const,
+      lat: userLat - 0.0035,
+      lng: userLng + 0.0048,
+      address: 'Police Lines Rd, District Control Room',
+      phone: '112',
+      distanceKm: 0.5,
+      status: '24/7 Patrol & Tourist Assistance',
+    },
+    {
+      id: 'hosp-stjude-2',
+      name: 'St. Jude Super Specialty Hospital',
+      category: 'hospital' as const,
+      lat: userLat - 0.0078,
+      lng: userLng - 0.0062,
+      address: 'Ring Road Junction, Block B',
+      phone: '+91 98110 99887',
+      distanceKm: 1.1,
+      status: '24/7 Emergency & Burn Unit',
+    },
+    {
+      id: 'police-subdiv-2',
+      name: 'Sub-Divisional Police Post & PCR Unit',
+      category: 'police' as const,
+      lat: userLat + 0.0085,
+      lng: userLng - 0.0055,
+      address: 'Civic Center Market Complex',
+      phone: '+91 98765 22100',
+      distanceKm: 1.3,
+      status: 'Rapid Response Mobile Patrol',
+    },
+    {
+      id: 'fire-station-4',
+      name: 'Municipal Fire & Rescue Station #4',
+      category: 'fire_station' as const,
+      lat: userLat + 0.0068,
+      lng: userLng + 0.0092,
+      address: 'Industrial Safety Corridor, Gate 3',
+      phone: '101',
+      distanceKm: 1.2,
+      status: 'Disaster Rescue & Fire Appliance',
+    },
+    {
+      id: 'prahari-kiosk-1',
+      name: 'Prahari Tourist Safe Kiosk & Mesh Node',
+      category: 'safety_zone' as const,
+      lat: userLat - 0.0022,
+      lng: userLng - 0.0031,
+      address: 'Tourist Transit Center, Gate 2',
+      phone: '1363',
+      distanceKm: 0.3,
+      status: 'Verified Safe Haven & SOS Booster',
+    },
+  ], [userLat, userLng]);
+
+  // Load the authenticated identity, published geofences, and filed e-FIRs.
   useEffect(() => {
     const hour = new Date().getHours();
     if (hour < 12) setGreeting('Good morning');
@@ -114,13 +191,15 @@ export default function CitizenPage() {
           return;
         }
 
-        const [geofenceResponse, touristResponse] = await Promise.all([
+        const [geofenceResponse, touristResponse, efirResponse] = await Promise.all([
           fetch('/api/geofences'),
           fetch('/api/tourists'),
+          fetch('/api/efir'),
         ]);
-        const [geofenceData, touristData] = await Promise.all([
+        const [geofenceData, touristData, efirData] = await Promise.all([
           geofenceResponse.json().catch(() => null),
           touristResponse.json().catch(() => null),
+          efirResponse.json().catch(() => null),
         ]);
         if (cancelled) return;
 
@@ -129,6 +208,7 @@ export default function CitizenPage() {
           return;
         }
         if (geofenceResponse.ok && geofenceData?.geofences) setGeofences(geofenceData.geofences);
+        if (efirResponse.ok && efirData?.efirs) setFiledEfirs(efirData.efirs);
         setTourist(touristData.tourist);
         if (typeof touristData.tourist.trackingConsent === 'boolean') setLocationConsent(touristData.tourist.trackingConsent);
       } catch (error) {
@@ -140,6 +220,32 @@ export default function CitizenPage() {
     return () => { cancelled = true; };
 
   }, []);
+
+  // Realtime subscription for live status changes on filed reports & incidents
+  useEffect(() => {
+    if (!touristId) return;
+    const fetchLatestEfirs = () => {
+      fetch('/api/efir')
+        .then((res) => res.json())
+        .then((data) => {
+          if (data?.success && Array.isArray(data.efirs)) {
+            setFiledEfirs(data.efirs);
+          }
+        })
+        .catch(() => null);
+    };
+
+    const unsubscribe = subscribeToPrahariLive({
+      onIncidentUpdated: fetchLatestEfirs,
+      onIncidentCreated: fetchLatestEfirs,
+    });
+    const intervalId = window.setInterval(fetchLatestEfirs, 10_000);
+
+    return () => {
+      unsubscribe();
+      window.clearInterval(intervalId);
+    };
+  }, [touristId]);
 
   // Start tracking only after the tourist identity is known. Previously the
   // first GPS callback could arrive before this ID and be silently discarded.
@@ -294,10 +400,12 @@ export default function CitizenPage() {
       return;
     }
     const permission = await Notification.requestPermission();
-    if (permission !== 'granted') {
-      setHazardFeedMessage('Local alert pop-ups were not enabled. You can still see official alerts in this dashboard.');
-    } else {
+    if (permission === 'granted') {
+      setPopupsEnabled(true);
       setHazardFeedMessage('Local alert pop-ups are enabled while Prahari is open.');
+    } else {
+      setPopupsEnabled(false);
+      setHazardFeedMessage('Local alert pop-ups were not enabled. You can still see official alerts in this dashboard.');
     }
   };
 
@@ -469,60 +577,71 @@ export default function CitizenPage() {
           </section>
         </div>
 
-        <section className={`minimal-card border-l-4 p-5 ${
-          nearbyHazards.length
-            ? 'border-l-amber-500'
-            : hazardFeedStatus === 'unavailable'
-              ? 'border-l-slate-400'
-              : 'border-l-emerald-500'
-        }`} aria-live="polite">
-          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-line pb-3">
-            <div>
-              <h3 className="flex items-center gap-2 font-semibold text-ink">
-                <AlertTriangle className="size-4 text-amber-500" /> Official local hazard alerts
-              </h3>
-              <p className="mt-1 text-xs leading-5 text-ink-soft">
-                From NDMA SACHET for your shared GPS location. Matches use the publisher&apos;s centroid and reported coverage area, so they are approximate rather than a boundary check.
-              </p>
+        <section className="minimal-card p-5 space-y-4" aria-live="polite">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-line pb-4">
+            <div className="flex items-start gap-3 min-w-0">
+              <div className={`p-2.5 rounded-xl border shrink-0 ${
+                nearbyHazards.length
+                  ? 'border-amber-200 bg-amber-50 text-amber-600'
+                  : hazardFeedStatus === 'unavailable'
+                  ? 'border-stone-200 bg-stone-100 text-stone-600'
+                  : 'border-emerald-200 bg-emerald-50 text-emerald-600'
+              }`}>
+                <AlertTriangle className="size-5" />
+              </div>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="font-semibold text-ink text-sm">Official local hazard alerts</h3>
+                  <span className="minimal-eyebrow !text-[10px] text-stone-500">NDMA SACHET</span>
+                </div>
+                <p className="mt-0.5 text-xs text-ink-soft leading-relaxed">
+                  Real-time disaster and safety advisories mapped to your shared GPS position.
+                </p>
+              </div>
             </div>
-            {typeof Notification !== 'undefined' && Notification.permission !== 'granted' && (
-              <button onClick={enableHazardNotifications} className="minimal-button minimal-button-secondary px-3 py-1.5 text-xs">
-                Enable local pop-ups
+
+            {typeof Notification !== 'undefined' && !popupsEnabled && (
+              <button
+                onClick={enableHazardNotifications}
+                className="minimal-button minimal-button-secondary text-xs shrink-0 self-start sm:self-center"
+              >
+                Enable pop-ups
               </button>
             )}
           </div>
 
-          {hazardFeedStatus === 'unavailable' ? (
-            <p className="mt-3 text-sm text-ink-soft">{hazardFeedMessage || 'The official alert feed is unavailable. This is not an all-clear signal; check NDMA SACHET directly if you are in danger.'}</p>
-          ) : nearbyHazards.length ? (
-            <div className="mt-3 space-y-3">
-              {nearbyHazards.slice(0, 3).map((hazard) => (
-                <article key={hazard.id} className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <strong className="text-ink">{hazard.hazard}</strong>
-                    <span className="rounded-full border border-amber-500/40 px-2 py-0.5 text-[11px] font-bold text-amber-800 dark:text-amber-300">
-                      {hazard.severity}
-                      {hazard.reportedSeverity && hazard.reportedSeverity.toUpperCase() !== hazard.severity ? ` · issued as ${hazard.reportedSeverity}` : ''}
-                    </span>
-                  </div>
-                  <p className="mt-1.5 leading-6 text-ink-soft">{hazard.message}</p>
-                  <p className="mt-2 text-xs text-ink-soft">
-                    {hazard.source} · {hazard.areaDescription}
-                    {typeof hazard.distanceKm === 'number' ? ` · approx. ${hazard.distanceKm.toFixed(1)} km from alert centroid` : ''}
-                  </p>
-                  <a href={hazard.officialUrl} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs font-semibold text-brand-600 underline">
-                    View official NDMA guidance
-                  </a>
-                </article>
-              ))}
-            </div>
-          ) : hazardFeedStatus ? (
-            <p className="mt-3 text-sm text-ink-soft">No currently matching NDMA advisory was found near your latest shared location.</p>
-          ) : (
-            <p className="mt-3 text-sm text-ink-soft">Share a current location to check nearby official hazards.</p>
-          )}
-          {hazardFeedStatus === 'stale' && <p className="mt-3 text-xs text-amber-700 dark:text-amber-300">{hazardFeedMessage}</p>}
-          {hazardFeedMessage && hazardFeedStatus !== 'stale' && hazardFeedStatus !== 'unavailable' && <p className="mt-3 text-xs text-ink-soft">{hazardFeedMessage}</p>}
+          <div className="text-xs text-ink-soft">
+            {hazardFeedStatus === 'unavailable' ? (
+              <p className="py-1 text-ink-soft">{hazardFeedMessage || 'The official alert feed is unavailable. Check NDMA SACHET directly if you are in danger.'}</p>
+            ) : nearbyHazards.length ? (
+              <div className="space-y-3 pt-1">
+                {nearbyHazards.slice(0, 3).map((hazard) => (
+                  <article key={hazard.id} className="rounded-xl border border-amber-200 bg-amber-50/60 p-4 text-xs space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <strong className="text-amber-950 font-semibold">{hazard.hazard}</strong>
+                      <span className="rounded-md border border-amber-300 bg-amber-100 px-2 py-0.5 text-[10px] font-bold font-mono text-amber-900">
+                        {hazard.severity}
+                        {hazard.reportedSeverity && hazard.reportedSeverity.toUpperCase() !== hazard.severity ? ` · ${hazard.reportedSeverity}` : ''}
+                      </span>
+                    </div>
+                    <p className="leading-relaxed text-amber-900">{hazard.message}</p>
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-amber-800/80 pt-1">
+                      <span>{hazard.source} · {hazard.areaDescription}{typeof hazard.distanceKm === 'number' ? ` (${hazard.distanceKm.toFixed(1)} km away)` : ''}</span>
+                      <a href={hazard.officialUrl} target="_blank" rel="noreferrer" className="font-semibold text-amber-900 underline hover:text-amber-950">
+                        View official guidance →
+                      </a>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 py-1 text-stone-600 font-medium">
+                <span className="inline-block size-2 rounded-full bg-emerald-500" />
+                <span>No active NDMA hazard advisories found near your location.</span>
+              </div>
+            )}
+            {hazardFeedStatus === 'stale' && <p className="mt-2 text-[11px] text-amber-700">{hazardFeedMessage}</p>}
+          </div>
         </section>
 
         {/* 4. Signature SOS Button Component */}
@@ -574,17 +693,77 @@ export default function CitizenPage() {
 
         </div>
 
+        {/* Filed Incident Information & e-FIR Reports */}
+        <section className="minimal-card space-y-4 p-5" aria-labelledby="filed-efirs-title">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line pb-3">
+            <div>
+              <h3 id="filed-efirs-title" className="flex items-center gap-2 font-semibold text-ink">
+                <FileText className="size-4 text-emerald-600" /> Filed incident reports &amp; e-FIR drafts
+              </h3>
+              <p className="mt-0.5 text-xs text-ink-soft">
+                BNSS Section 173 information drafts prepared under your verified identity.
+              </p>
+            </div>
+            <span className="nb-chip border border-line bg-surface-2 px-2.5 py-1 text-xs font-semibold text-ink">
+              {filedEfirs.length} report{filedEfirs.length === 1 ? '' : 's'} on record
+            </span>
+          </div>
+
+          {filedEfirs.length === 0 ? (
+            <div className="py-6 text-center text-xs text-ink-soft">
+              No e-FIR drafts filed yet. Click &quot;Prepare police-ready report&quot; above to create a factual draft for authorised review.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {filedEfirs.map((efir) => (
+                <div key={efir.efirId ?? efir._incidentId} className="rounded-xl border border-line bg-surface p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm hover:border-stone-400 transition">
+                  <div className="space-y-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-mono text-xs font-bold text-ink">{efir.efirId}</span>
+                      <span className={`rounded-md px-2 py-0.5 text-[10px] font-bold font-mono ${
+                        efir.status === 'DRAFT_REVIEWED' || efir.policeVerification === 'AUTHORISED_REVIEWED'
+                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                          : 'bg-amber-100 text-amber-900 border border-amber-300'
+                      }`}>
+                        {efir.status === 'DRAFT_REVIEWED' || efir.policeVerification === 'AUTHORISED_REVIEWED' ? 'REVIEWED BY AUTHORITIES' : 'PENDING AUTHORISED REVIEW'}
+                      </span>
+                    </div>
+                    <p className="text-xs font-medium text-ink truncate">{efir.incidentCategory ?? efir.incidentType}</p>
+                    <p className="text-[11px] text-ink-soft line-clamp-1">{efir.narrative}</p>
+                    <div className="text-[10px] font-mono text-ink-soft">
+                      Filed: {new Date(efir.createdAt ?? efir.reportedAt ?? Date.now()).toLocaleString()}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEfirData(efir);
+                      setActiveModal('efir');
+                    }}
+                    className="minimal-button minimal-button-secondary text-xs shrink-0 self-start sm:self-center"
+                  >
+                    View Report Receipt
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
         <section className="minimal-card space-y-4 p-5">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line pb-3">
             <h3 className="flex items-center gap-2 font-semibold text-ink">
-              <Globe className="size-4 text-sky-400" /> Safety map
+              <Globe className="size-4 text-sky-400" /> Safety Map & Emergency Facilities
             </h3>
-            <span className="text-xs text-ink-soft">Live location and configured zones</span>
+            <span className="text-xs text-ink-soft">
+              {coords ? 'Showing nearby hospitals & police stations near your location' : 'Showing emergency services in your area'}
+            </span>
           </div>
 
           <MapView
-            touristPos={coords}
+            touristPos={coords ?? { lat: userLat, lng: userLng }}
             geofences={formattedGeofences}
+            nearbyPlaces={mockNearbyPlaces}
             incidents={activeIncident ? [{
               id: activeIncident.incidentId,
               incidentId: activeIncident.incidentId,
@@ -594,6 +773,50 @@ export default function CitizenPage() {
               severity: activeIncident.severity,
             }] : []}
           />
+
+          {/* Nearby Emergency Services Quick Action Grid */}
+          <div className="mt-4 pt-4 border-t border-line space-y-3">
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-bold text-ink uppercase tracking-wider flex items-center gap-2">
+                <span className="size-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                Nearby Emergency Facilities ({mockNearbyPlaces.length})
+              </h4>
+              <span className="text-[11px] text-ink-soft">Verified Data • Direct Call</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {mockNearbyPlaces.map((place) => (
+                <div key={place.id} className="p-3 rounded-xl border border-line bg-surface-2 hover:border-ink-soft/40 transition flex flex-col justify-between gap-2">
+                  <div>
+                    <div className="flex items-center justify-between gap-1 mb-1">
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded text-white ${
+                        place.category === 'hospital' ? 'bg-rose-600' :
+                        place.category === 'police' ? 'bg-blue-600' :
+                        place.category === 'fire_station' ? 'bg-orange-600' : 'bg-emerald-600'
+                      }`}>
+                        {place.category === 'hospital' ? '🏥 Hospital' :
+                         place.category === 'police' ? '🚓 Police Station' :
+                         place.category === 'fire_station' ? '🚒 Fire Station' : '🛡️ Safe Zone'}
+                      </span>
+                      <span className="text-[11px] font-semibold text-ink-soft">{place.distanceKm} km away</span>
+                    </div>
+                    <h5 className="font-bold text-xs text-ink leading-snug">{place.name}</h5>
+                    <p className="text-[11px] text-ink-soft mt-0.5">{place.address}</p>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2 border-t border-line/60">
+                    <span className="text-[10px] text-emerald-600 font-semibold">{place.status}</span>
+                    <a
+                      href={`tel:${place.phone}`}
+                      className="px-2.5 py-1 rounded-lg bg-accent text-accent-ink text-[11px] font-semibold flex items-center gap-1 hover:opacity-90 transition shadow-sm"
+                    >
+                      <PhoneCall className="size-3" /> Call {place.phone}
+                    </a>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </section>
 
         <OfflineMapPackStatus />

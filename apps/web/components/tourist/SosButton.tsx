@@ -59,6 +59,17 @@ export default function SosButton({
     return () => { abandoned = true; };
   }, [touristId]);
 
+  // Zero-touch offline mesh listener: listens for nearby offline SOS broadcasts
+  // and auto-relays them to Police HQ if this device is online.
+  useEffect(() => {
+    let cleanup: (() => void) | null = null;
+    void (async () => {
+      const { startMeshBroadcastListener } = await import('@/lib/sos-mesh/transports/broadcastMeshTransport');
+      cleanup = startMeshBroadcastListener();
+    })();
+    return () => cleanup?.();
+  }, []);
+
   const setUpOptionalBleGateway = async () => {
     try {
       setPairingBle(true);

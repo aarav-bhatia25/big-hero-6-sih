@@ -28,9 +28,37 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'You are not authorised to read this incident communication.' }, { status: 403 });
     }
 
-    const messages = Array.isArray(incident.incidentMessages)
-      ? incident.incidentMessages
-      : serverChatThreads.get(incidentId) ?? [];
+    let messages = Array.isArray(incident.incidentMessages)
+      ? [...incident.incidentMessages]
+      : [...(serverChatThreads.get(incidentId) ?? [])];
+
+    if (incident.voiceStatement && !messages.some((m: any) => m.packetId?.startsWith('PKT-VOICE-') || m.chatText === incident.voiceStatement)) {
+      const voicePacket = {
+        version: 1,
+        packetId: `PKT-VOICE-${incidentId}`,
+        incidentId,
+        touristId: incident.touristId,
+        type: 'SOS',
+        severity: incident.severity || 'CRITICAL',
+        latitude: incident.location?.lat ?? null,
+        longitude: incident.location?.lng ?? null,
+        accuracy: 10,
+        timestamp: typeof incident.createdAt === 'string' ? new Date(incident.createdAt).getTime() : Date.now(),
+        expiresAt: Date.now() + 24 * 60 * 60 * 1000,
+        ttl: 8,
+        hopCount: 0,
+        originDeviceId: 'WEB',
+        lastKnownTransport: incident.transportType || 'INTERNET',
+        relayPath: [],
+        packetCategory: 'CHAT_MESSAGE',
+        senderRole: 'tourist',
+        senderName: `${incident.touristName || 'Traveller'} (Voice SOS)`,
+        chatText: incident.voiceStatement,
+        chatLanguage: incident.voiceStatementLanguage || 'mr-IN',
+      };
+      messages = [voicePacket, ...messages];
+    }
+
     return NextResponse.json({ success: true, messages });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });

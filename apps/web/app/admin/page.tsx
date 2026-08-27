@@ -429,7 +429,15 @@ export default function AdminPage() {
           <button onClick={() => { setGeofenceError(null); setShowGeofenceForm(true); }} className="minimal-button minimal-button-secondary">
             <Plus size={16} /><span className="hidden sm:inline">Add geofence</span>
           </button>
-          <Link href="/citizen" className="minimal-button minimal-button-primary">Citizen view</Link>
+          <button
+            onClick={async () => {
+              await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+              window.location.href = '/login';
+            }}
+            className="minimal-button minimal-button-primary"
+          >
+            Citizen view
+          </button>
           <button
             onClick={async () => { await fetch('/api/auth/logout', { method: 'POST' }); window.location.href = '/login'; }}
             aria-label="Sign out"
@@ -623,12 +631,19 @@ export default function AdminPage() {
                   </section>
                 )}
                 {selectedIncident.voiceStatement && (
-                  <section className="rounded-nb border border-emerald-400/30 bg-emerald-400/10 p-4" aria-label="Traveller reviewed voice SOS statement">
-                    <p className="minimal-eyebrow text-emerald-300">Traveller-reviewed voice SOS statement</p>
-                    <p className="mt-1 text-xs text-ink-soft">Original language: {travellerLanguageLabel(selectedIncident.voiceStatementLanguage)}</p>
-                    <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-ink">{selectedIncident.voiceStatement}</p>
-                    <p className="mt-3 text-xs leading-5 text-ink-soft">This is the traveller&apos;s reviewed transcript, not an audio recording. Use the incident chat translation action or AI brief as an aid; retain the original wording in operational decisions.</p>
-                  </section>
+                  <div className="pt-3 mt-3 border-t border-line space-y-2" aria-label="Traveller reviewed voice SOS statement">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-ink flex items-center gap-1.5">
+                        <span className="size-2 rounded-full bg-emerald-500"></span>
+                        Traveller Voice SOS Statement
+                      </span>
+                      <span className="text-[11px] text-ink-soft">Original language: {travellerLanguageLabel(selectedIncident.voiceStatementLanguage)}</span>
+                    </div>
+                    <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink font-medium pl-3 border-l-2 border-emerald-500/60 py-0.5 my-1">
+                      &ldquo;{selectedIncident.voiceStatement}&rdquo;
+                    </p>
+                    <p className="text-[11px] text-ink-soft">Traveller-reviewed transcript recorded at time of distress.</p>
+                  </div>
                 )}
                 <MissingPersonDraftPanel
                   incident={selectedIncident}

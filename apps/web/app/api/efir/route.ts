@@ -152,17 +152,24 @@ export async function POST(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request, ['authority', 'admin', 'responder']);
+  const auth = await requireAuth(request, ['tourist', 'authority', 'admin', 'responder']);
   if (auth.errorResponse) return auth.errorResponse;
+  const { session } = auth;
 
   try {
     const incidentId = new URL(request.url).searchParams.get('incidentId');
     if (incidentId) {
       const incident = operationalIncidents(await listIncidents(200)).find((item: any) => item.incidentId === incidentId && item.efirDraft);
       if (!incident) return NextResponse.json({ success: false, error: 'Incident information draft not found.' }, { status: 404 });
-      return NextResponse.json({ success: true, evidence: await verifyEfirEvidence(incidentId, incident.efirDraft) });
+      if (session.role === 'tourist' && incident.touristId !== session.touristId) {
+        return NextResponse.json({ success: false, error: 'Unauthorised.' }, { status: 403 });
+      }
+      return NextResponse.json({ success: true, evidence: await verifyEfirEvidence(incidentId, incident.efirDraft), efir: incident.efirDraft });
     }
-    const incidentsWithEfir = operationalIncidents(await listIncidentsWithEfir());
+    let incidentsWithEfir = operationalIncidents(await listIncidentsWithEfir());
+    if (session.role === 'tourist') {
+      incidentsWithEfir = incidentsWithEfir.filter((i: any) => i.touristId === session.touristId);
+    }
 
     return NextResponse.json({ success: true, efirs: incidentsWithEfir.map((i) => ({ ...i.efirDraft, _incidentId: i.incidentId })) });
   } catch (err: any) {

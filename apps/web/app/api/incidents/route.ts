@@ -91,6 +91,33 @@ export async function POST(request: NextRequest) {
 
     const match = findNearestResponder(incidentLat, incidentLng, candidates);
 
+    const initialMessages: any[] = [];
+    if (voiceStatement) {
+      initialMessages.push({
+        version: 1,
+        packetId: `PKT-VOICE-${incidentId}`,
+        incidentId,
+        touristId,
+        type: 'SOS',
+        severity,
+        latitude: incidentLat,
+        longitude: incidentLng,
+        accuracy: 10,
+        timestamp: Date.now(),
+        expiresAt: Date.now() + 24 * 60 * 60 * 1000,
+        ttl: 8,
+        hopCount,
+        originDeviceId: originDeviceId || 'WEB',
+        lastKnownTransport: transportType || 'INTERNET',
+        relayPath: relayPath || [],
+        packetCategory: 'CHAT_MESSAGE',
+        senderRole: 'tourist',
+        senderName: `${tourist.name ?? touristName ?? 'Traveller'} (Voice SOS)`,
+        chatText: voiceStatement,
+        chatLanguage: voiceStatementLanguage || 'mr-IN',
+      });
+    }
+
     const incident = {
       incidentId,
       touristId,
@@ -118,6 +145,7 @@ export async function POST(request: NextRequest) {
       // It gives authorised officers the speaker's own wording alongside an
       // explicitly labelled language for later translation.
       ...(voiceStatement ? { voiceStatement, voiceStatementLanguage } : {}),
+      incidentMessages: initialMessages,
       ...(tourist.clothingProfile ? {
         emergencyIdentificationProfile: tourist.clothingProfile,
         emergencyIdentificationProfileSharedAt: new Date().toISOString(),
