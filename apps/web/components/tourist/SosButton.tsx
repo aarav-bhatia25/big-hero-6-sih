@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { Siren, CheckCircle2, Loader2, XCircle } from 'lucide-react';
 import OfflineEmergencyChat from '@/components/tourist/OfflineEmergencyChat';
+import PeerMeshConnect from '@/components/tourist/PeerMeshConnect';
 import { createSOSPacket } from '@/lib/sos-mesh/sosPacket';
 import { globalTransportManager } from '@/lib/sos-mesh/transports/transportManager';
 
@@ -224,6 +225,10 @@ export default function SosButton({
           <span className="mt-3 text-center text-xs text-ink-soft">
             {canDispatch ? 'Your current location will be shared with the authority queue.' : 'Waiting for a verified ID and current location.'}
           </span>
+
+          <div className="w-full max-w-md mt-4">
+            <PeerMeshConnect />
+          </div>
         </div>
       )}
     </section>

@@ -13,6 +13,7 @@
 import { SOSTransport, TransportResult, TransportChannel } from './types';
 import { InternetTransport } from './internetTransport';
 import { BleTransport } from './bleTransport';
+import { globalWebRtcTransport } from './webRtcTransport';
 import { LocalTransport } from './localTransport';
 import { SOSPacket } from '../sosPacket';
 import { globalSOSStateMachine } from '../sosStateMachine';
@@ -25,6 +26,7 @@ export class SOSTransportManager {
   constructor() {
     this.transports = [
       new InternetTransport(),
+      globalWebRtcTransport,
       new BleTransport(),
       new LocalTransport(),
     ];
