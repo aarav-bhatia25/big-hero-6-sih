@@ -205,10 +205,10 @@ export async function getAllQueuedPackets(): Promise<QueuedPacketRecord[]> {
 }
 
 /**
- * Duplicate Prevention: Check if packet ID has been seen previously.
+ * Duplicate Prevention: Check if packet ID or Nostr event ID has been seen previously.
  */
-export async function hasSeenPacket(packetId: string): Promise<boolean> {
-  if (memorySeenPackets.has(packetId)) return true;
+export async function hasSeenPacket(packetId: string, nostrId?: string): Promise<boolean> {
+  if (memorySeenPackets.has(packetId) || (nostrId && memorySeenPackets.has(nostrId))) return true;
 
   const db = await getDB();
   if (!db) return false;
@@ -220,8 +220,24 @@ export async function hasSeenPacket(packetId: string): Promise<boolean> {
       const req = store.get(packetId);
       req.onsuccess = () => {
         const exists = Boolean(req.result);
-        if (exists) memorySeenPackets.add(packetId);
-        resolve(exists);
+        if (exists) {
+          memorySeenPackets.add(packetId);
+          if (nostrId) memorySeenPackets.add(nostrId);
+          resolve(true);
+        } else if (nostrId) {
+          const req2 = store.get(nostrId);
+          req2.onsuccess = () => {
+            const exists2 = Boolean(req2.result);
+            if (exists2) {
+              memorySeenPackets.add(packetId);
+              memorySeenPackets.add(nostrId);
+            }
+            resolve(exists2);
+          };
+          req2.onerror = () => resolve(false);
+        } else {
+          resolve(false);
+        }
       };
       req.onerror = () => resolve(false);
     } catch {
@@ -231,10 +247,11 @@ export async function hasSeenPacket(packetId: string): Promise<boolean> {
 }
 
 /**
- * Duplicate Prevention: Mark packet ID as seen.
+ * Duplicate Prevention: Mark packet ID and Nostr event ID as seen.
  */
-export async function markPacketAsSeen(packetId: string): Promise<void> {
+export async function markPacketAsSeen(packetId: string, nostrId?: string): Promise<void> {
   memorySeenPackets.add(packetId);
+  if (nostrId) memorySeenPackets.add(nostrId);
 
   const db = await getDB();
   if (!db) return;
@@ -243,6 +260,9 @@ export async function markPacketAsSeen(packetId: string): Promise<void> {
     const tx = db.transaction(DEDUP_STORE, 'readwrite');
     const store = tx.objectStore(DEDUP_STORE);
     store.put({ packetId, seenAt: Date.now() });
+    if (nostrId && nostrId !== packetId) {
+      store.put({ packetId: nostrId, seenAt: Date.now() });
+    }
   } catch (err) {
     console.warn('[SOSQueue] markPacketAsSeen error:', err);
   }
