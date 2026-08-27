@@ -88,6 +88,31 @@ function LoginFormContent() {
     }
   };
 
+  const handleEvaluatorOneClickLogin = async (role: 'authority' | 'responder' = 'authority') => {
+    setStaffLoading(true);
+    setStaffError(null);
+    try {
+      const emailToUse = role === 'responder' ? 'responder@police.gov.in' : 'officer.sharma@police.gov.in';
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: emailToUse, password: 'Prahari@123' }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        setStaffError(data.error || 'Evaluator mode login failed.');
+        return;
+      }
+      const targetRoute = redirect || (role === 'responder' ? '/dashboard' : '/authority');
+      router.push(targetRoute as any);
+      router.refresh();
+    } catch (err: any) {
+      setStaffError(err.message || 'Connection error.');
+    } finally {
+      setStaffLoading(false);
+    }
+  };
+
   const handleTouristLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setTouristLoading(true);
@@ -125,6 +150,42 @@ function LoginFormContent() {
           <div className="text-center space-y-2">
             <h1 className="ui-display text-3xl text-ink">Sign in to Prahari</h1>
             <p className="text-base text-ink-soft">Choose the access type that applies to you.</p>
+          </div>
+
+          {/* Evaluator Mode Banner */}
+          <div className="minimal-card p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-emerald-600 animate-ping" />
+                <span className="minimal-eyebrow">Evaluator Demo Mode</span>
+              </div>
+              <span className="nb-chip nb-chip-accent text-[10px] py-0.5 px-2 font-mono">
+                SIH Evaluation Ready
+              </span>
+            </div>
+            <p className="text-xs text-ink-soft">
+              One-click instant login for evaluators and judges to test authority dashboards.
+            </p>
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => handleEvaluatorOneClickLogin('authority')}
+                disabled={staffLoading}
+                className="minimal-button minimal-button-primary text-xs w-full"
+              >
+                <Building2 className="w-4 h-4" />
+                <span>Authority Desk</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleEvaluatorOneClickLogin('responder')}
+                disabled={staffLoading}
+                className="minimal-button minimal-button-secondary text-xs w-full"
+              >
+                <Smartphone className="w-4 h-4" />
+                <span>Responder Unit</span>
+              </button>
+            </div>
           </div>
 
           <Link href="/onboarding" className="minimal-button minimal-button-primary w-full">
@@ -185,6 +246,26 @@ function LoginFormContent() {
                   {staffLoading ? 'Verifying credentials…' : 'Sign in to authority desk'}
                 </button>
 
+                <div className="nb-card-flat bg-surface-2 p-3 text-xs space-y-2 mt-4 border border-border">
+                  <div className="flex items-center justify-between font-bold text-ink">
+                    <span>⚡ Demo Authority Credentials</span>
+                    <span className="nb-chip text-[10px] py-0.5 px-2">Pre-Configured</span>
+                  </div>
+                  <p className="text-[11px] text-ink-soft">
+                    Email: <code className="font-mono bg-surface px-1.5 py-0.5 rounded border border-border text-ink">officer.sharma@police.gov.in</code><br />
+                    Password: <code className="font-mono bg-surface px-1.5 py-0.5 rounded border border-border text-ink">Prahari@123</code>
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEmail('officer.sharma@police.gov.in');
+                      setPassword('Prahari@123');
+                    }}
+                    className="minimal-button minimal-button-secondary w-full text-xs !min-h-[2.2rem]"
+                  >
+                    Auto-Fill Demo Credentials
+                  </button>
+                </div>
               </form>
             )}
 
